@@ -1,0 +1,18 @@
+{
+  "sam_url": {
+    "description": "SAM服务器地址",
+    "type": "string",
+    "default": ""
+  },
+  "admin_user": {
+    "description": "管理员用户名",
+    "type": "string",
+    "default": ""
+  },
+  "admin_pass": {
+    "description": "管理员密码",
+    "type": "string",
+    "obvious_hint": true,
+    "default": ""
+  }
+}
