@@ -183,18 +183,21 @@ class UserDevicesPlugin(Star):
                     yield event.plain_result(f"@ {nickname} 请先添加机器人为好友后再使用此功能")
                 return
             
-            if self._is_trigger(message_str) and "[CQ:at," in event.message_str:
-                try:
-                    await event.bot.send_private_msg(
-                        user_id=int(user_id),
-                        message=self.get_account_type_description()
-                    )
-                except Exception as e:
-                    logger.warning(f"发送私聊失败: {e}")
-                    nickname = event.get_sender_nickname() if hasattr(event, 'get_sender_nickname') else str(user_id)
-                    yield event.plain_result(f"@ {nickname} 请先添加机器人为好友后再使用此功能")
-                event.stop_event()
-                return
+            if self._is_trigger(message_str):
+                is_at_me = "[CQ:at," in event.message_str or f"[CQ:at,qq={self.config.get('qq', '')}]" in event.message_str
+                
+                if is_at_me:
+                    try:
+                        await event.bot.send_private_msg(
+                            user_id=int(user_id),
+                            message=self.get_account_type_description()
+                        )
+                    except Exception as e:
+                        logger.warning(f"发送私聊失败: {e}")
+                        nickname = event.get_sender_nickname() if hasattr(event, 'get_sender_nickname') else str(user_id)
+                        yield event.plain_result(f"@ {nickname} 请先添加机器人为好友后再使用此功能")
+                    event.stop_event()
+                    return
             
             return
         
