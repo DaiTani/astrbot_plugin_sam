@@ -149,7 +149,11 @@ class UserDevicesPlugin(Star):
                         message="已收到查询请求，正在处理..."
                     )
                     await self._process_query(event, query_student_id)
-                    yield event.plain_result(f"@ {event.sender.get_nickname()} 已通过私聊为您处理查询请求")
+                    try:
+                        nickname = event.get_sender_nickname() if hasattr(event, 'get_sender_nickname') else str(user_id)
+                    except:
+                        nickname = str(user_id)
+                    yield event.plain_result(f"@ {nickname} 已通过私聊为您处理查询请求")
                 except Exception as e:
                     logger.warning(f"发送私聊失败: {e}")
                     yield event.plain_result("请先添加机器人为好友后再使用此功能")
