@@ -1,4 +1,5 @@
 from astrbot.api.event import filter, AstrMessageEvent, MessageChain
+from astrbot.api.event.filter import EventMessageType
 from astrbot.api.star import Context, Star
 from astrbot.api import logger
 from astrbot.core.utils.session_waiter import session_waiter, SessionController
@@ -16,31 +17,29 @@ class UserDevicesPlugin(Star):
         keywords = ["在线设备", "查询设备", "设备查询", "在线用户", "查询用户", "用户查询"]
         return any(kw in message for kw in keywords)
     
-    @filter.event_message_type(filter.EventMessageType.ALL)
-    async def on_all_message(self, event: AstrMessageEvent):
+    @filter.event_message_type(EventMessageType.GROUP_MESSAGE)
+    async def on_group_message(self, event: AstrMessageEvent):
         message_str = event.message_str.strip()
         user_id = event.get_sender_id()
-        group_id = event.message_obj.group_id if hasattr(event.message_obj, 'group_id') else ""
-        is_group = bool(group_id)
+        
+        if self._is_trigger(message_str):
+            await event.bot.send_private_msg(
+                user_id=int(user_id),
+                message="请直接发送学号给我进行查询\n（例如202592xxxxxx）"
+            )
+            event.stop_event()
+    
+    @filter.event_message_type(EventMessageType.PRIVATE_MESSAGE)
+    async def on_private_message(self, event: AstrMessageEvent):
+        user_id = event.get_sender_id()
+        message_str = event.message_str.strip()
         
         student_id = self.extract_student_id(message_str)
-        
-        if is_group:
-            if self._is_trigger(message_str):
-                await event.bot.send_private_msg(
-                    user_id=int(user_id),
-                    message="请直接发送学号给我进行查询\n（例如202592xxxxxx）"
-                )
-                event.stop_event()
-            return
         
         if student_id:
             event.stop_event()
             result = await self.query_devices(student_id)
-            await event.bot.send_private_msg(
-                user_id=int(user_id),
-                message=result
-            )
+            await event.bot.send_private_msg(user_id=int(user_id), message=result)
             return
         
         if self._is_trigger(message_str):
