@@ -19,8 +19,8 @@ class UserDevicesPlugin(Star):
     def _get_private_session(self, unified_msg_origin: str, user_id: str) -> str:
         parts = unified_msg_origin.split(":")
         if len(parts) >= 2:
-            return f"{parts[0]}:friend_message:{user_id}"
-        return f"sam_bot:friend_message:{user_id}"
+            return f"{parts[0]}:PRIVATE_MESSAGE:{user_id}"
+        return f"sam_bot:PRIVATE_MESSAGE:{user_id}"
     
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def on_all_message(self, event: AstrMessageEvent):
