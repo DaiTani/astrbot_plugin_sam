@@ -18,18 +18,36 @@ class UserDevicesPlugin(Star):
         self.pending_reply = {}
         
     def _is_trigger(self, message: str) -> bool:
-        keywords = ["在线设备", "查询设备", "设备查询", "在线用户", "查询用户", "用户查询"]
+        keywords = ["在线设备", "查询设备", "设备查询", "在线用户", "查询用户", "用户查询", "zscx", "设备", "用户", "在线", "查询", "cx", "sb", "yh"]
         return any(kw in message for kw in keywords)
     
     def _extract_id_from_query(self, message: str) -> str:
         cleaned = re.sub(r'^@\S+\s*', '', message).strip()
-        match = re.match(r'^设备查询\s+(\d{12})$', cleaned)
-        if match:
-            return match.group(1)
+        
+        patterns = [
+            r'^设备查询\s+(1043\d{7})',
+            r'^设备查询\s+(5\d{5})',
+            r'^设备查询\s+(H[A-Za-z0-9]{6})'
+        ]
+        
+        for pattern in patterns:
+            match = re.match(pattern, cleaned)
+            if match:
+                return match.group(1)
+        
         return ""
     
-    async def _process_query(self, event: AstrMessageEvent, student_id: str):
+    async def _process_query(self, event: AstrMessageEvent, account_id: str):
         user_id = event.get_sender_id()
+        
+        is_valid, account_type = self.validate_account_format(account_id)
+        if not is_valid:
+            await event.bot.send_private_msg(
+                user_id=int(user_id),
+                message=self.get_error_message_for_invalid_format(account_id)
+            )
+            return
+        
         remaining = self._check_rate_limit(user_id)
         if remaining > 0:
             await event.bot.send_private_msg(
@@ -38,7 +56,8 @@ class UserDevicesPlugin(Star):
             )
             return
         
-        status, user_name, result = await self.query_devices(student_id)
+        logger.info(f"查询{account_type} [{account_id}] 的在线设备")
+        status, user_name, result = await self.query_devices(account_id)
         
         if status == "error":
             await event.bot.send_private_msg(user_id=int(user_id), message=result)
@@ -47,13 +66,14 @@ class UserDevicesPlugin(Star):
         if status == "offline":
             await event.bot.send_private_msg(
                 user_id=int(user_id),
-                message=f"用户 {student_id} 无设备在线"
+                message=f"用户 {account_id} 无设备在线"
             )
             return
         
         if status == "online":
             self.pending_verification[user_id] = {
-                "student_id": student_id,
+                "account_id": account_id,
+                "account_type": account_type,
                 "user_name": user_name,
                 "retry_count": 3
             }
@@ -61,7 +81,7 @@ class UserDevicesPlugin(Star):
             
             await event.bot.send_private_msg(
                 user_id=int(user_id),
-                message=f"请输入该学号用户登记的姓名进行验证:"
+                message=f"请输入该{account_type}登记的姓名进行验证:"
             )
             return
     
@@ -111,16 +131,18 @@ class UserDevicesPlugin(Star):
                 if user_id in self.pending_reply:
                     del self.pending_reply[user_id]
                 
+                account_type = verify_info.get("account_type", "账号")
                 await event.bot.send_private_msg(
                     user_id=int(user_id),
-                    message="姓名验证失败次数过多。Maximum number of retries reached. Please try again later."
+                    message=f"{account_type}姓名验证失败次数过多。请稍后再试。"
                 )
                 logger.info(f"用户 [{user_id}] 姓名验证失败，已达最大重试次数")
             else:
                 self.pending_verification[user_id]["retry_count"] = retry_count
+                account_type = verify_info.get("account_type", "账号")
                 await event.bot.send_private_msg(
                     user_id=int(user_id),
-                    message=f"姓名不匹配，请重新输入（剩余 {retry_count} 次尝试机会）:\n请输入该学号用户登记的姓名:"
+                    message=f"姓名不匹配，请重新输入（剩余 {retry_count} 次尝试机会）:\n请输入该{account_type}登记的姓名:"
                 )
             
             return True
@@ -137,18 +159,18 @@ class UserDevicesPlugin(Star):
             await self._handle_name_verification(event, message_str)
             return
         
-        student_id = self.extract_student_id(message_str)
-        query_student_id = self._extract_id_from_query(message_str)
+        account_id = self.extract_student_id(message_str)
+        query_account_id = self._extract_id_from_query(message_str)
         
         if is_group:
-            if query_student_id:
+            if query_account_id:
                 event.stop_event()
                 try:
                     await event.bot.send_private_msg(
                         user_id=int(user_id),
                         message="已收到查询请求，正在处理..."
                     )
-                    await self._process_query(event, query_student_id)
+                    await self._process_query(event, query_account_id)
                     try:
                         nickname = event.get_sender_nickname() if hasattr(event, 'get_sender_nickname') else str(user_id)
                     except:
@@ -163,7 +185,7 @@ class UserDevicesPlugin(Star):
                 try:
                     await event.bot.send_private_msg(
                         user_id=int(user_id),
-                        message="请直接发送学号给我进行查询\n（例如202592xxxxxx）"
+                        message=self.get_account_type_description()
                     )
                 except Exception as e:
                     logger.warning(f"发送私聊失败: {e}")
@@ -171,28 +193,56 @@ class UserDevicesPlugin(Star):
                 event.stop_event()
             return
         
-        if student_id or query_student_id:
+        if account_id or query_account_id:
             event.stop_event()
-            target_id = student_id if student_id else query_student_id
+            target_id = account_id if account_id else query_account_id
             await self._process_query(event, target_id)
             return
         
         if self._is_trigger(message_str):
             event.stop_event()
             self.pending_users.add(user_id)
-            yield event.plain_result("请发送学号进行查询\n（例如202592xxxxxx）")
+            yield event.plain_result("请发送账号进行查询\n" + self.get_account_type_description())
             return
         
         if user_id in self.pending_users:
             self.pending_users.discard(user_id)
-            yield event.plain_result("请输入正确的学号格式，例如202592xxxxxx")
+            
+            extracted_id = self.extract_student_id(message_str)
+            if extracted_id:
+                await self._process_query(event, extracted_id)
+            else:
+                yield event.plain_result(self.get_error_message_for_invalid_format(message_str))
             event.stop_event()
     
     def extract_student_id(self, message: str) -> str:
-        match = re.search(r'202[4-9]\d{8}', message)
-        if match:
-            return match.group(0)
+        patterns = [
+            r'1043\d{7}',
+            r'5\d{5}',
+            r'H[A-Za-z0-9]{6}'
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, message)
+            if match:
+                return match.group(0)
         return ""
+    
+    def validate_account_format(self, account: str) -> tuple[bool, str]:
+        # 验证账号格式并返回账号类型
+        if re.match(r'^1043\d{7}$', account):
+            return (True, "研究生账号
+            return (True, "正式编制教师账号")
+        elif re.match(r'^H[A-Za-z0-9]{6}$', account):
+            return (True, "合同工教师账号")
+        else:
+            return (False, "未知账号类型")
+    
+    def get_account_type_description(self) -> str:
+        return ("请发送账号进行查询")
+    
+    def get_error_message_for_invalid_format(self, user_input: str) -> str:
+        return (f"账号格式错误！")
     
     async def query_devices(self, username: str) -> str:
         logger.info(f"查询用户 [{username}] 的在线设备")
