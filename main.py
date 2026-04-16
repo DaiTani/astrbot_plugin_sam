@@ -6,19 +6,77 @@ import aiohttp
 import base64
 import xml.etree.ElementTree as ET
 import re
+import time
 
 class UserDevicesPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
         self.config = context.get_config()
         self.pending_users = set()
+        self.user_query_times = {}
+        self.pending_verification = {}
+        self.pending_reply = {}
         
     def _is_trigger(self, message: str) -> bool:
         keywords = ["在线设备", "查询设备", "设备查询", "在线用户", "查询用户", "用户查询"]
         return any(kw in message for kw in keywords)
     
+    def _check_rate_limit(self, user_id: str) -> int:
+        current_time = time.time()
+        if user_id in self.user_query_times:
+            last_query_time = self.user_query_times[user_id]
+            elapsed = current_time - last_query_time
+            if elapsed < 60:
+                remaining = int(60 - elapsed)
+                return remaining
+        self.user_query_times[user_id] = current_time
+        return 0
+    
     def _get_group_id(self, event: AstrMessageEvent) -> str:
         return event.message_obj.group_id if hasattr(event.message_obj, 'group_id') else ""
+    
+    async def _handle_name_verification(self, event: AstrMessageEvent, user_input: str) -> bool:
+        user_id = event.get_sender_id()
+        
+        if user_id not in self.pending_verification:
+            return False
+        
+        verify_info = self.pending_verification[user_id]
+        expected_name = verify_info["user_name"]
+        retry_count = verify_info.get("retry_count", 3)
+        input_name = user_input.strip()
+        
+        if input_name == expected_name:
+            result = self.pending_reply.get(user_id, "")
+            await event.bot.send_private_msg(user_id=int(user_id), message=result)
+            
+            del self.pending_verification[user_id]
+            if user_id in self.pending_reply:
+                del self.pending_reply[user_id]
+            
+            logger.info(f"用户 [{user_id}] 姓名验证成功")
+            return True
+        else:
+            retry_count -= 1
+            
+            if retry_count <= 0:
+                del self.pending_verification[user_id]
+                if user_id in self.pending_reply:
+                    del self.pending_reply[user_id]
+                
+                await event.bot.send_private_msg(
+                    user_id=int(user_id),
+                    message="❌ 姓名验证失败次数过多。Maximum number of retries reached. Please try again later."
+                )
+                logger.info(f"用户 [{user_id}] 姓名验证失败，已达最大重试次数")
+            else:
+                self.pending_verification[user_id]["retry_count"] = retry_count
+                await event.bot.send_private_msg(
+                    user_id=int(user_id),
+                    message=f"❌ 姓名不匹配，请重新输入（剩余 {retry_count} 次尝试机会）:\n请输入该学号用户登记的姓名:"
+                )
+            
+            return True
     
     @filter.event_message_type(EventMessageType.ALL)
     async def on_all_message(self, event: AstrMessageEvent):
@@ -26,6 +84,11 @@ class UserDevicesPlugin(Star):
         user_id = event.get_sender_id()
         group_id = self._get_group_id(event)
         is_group = bool(group_id)
+        
+        if user_id in self.pending_verification:
+            event.stop_event()
+            await self._handle_name_verification(event, message_str)
+            return
         
         student_id = self.extract_student_id(message_str)
         
@@ -44,9 +107,40 @@ class UserDevicesPlugin(Star):
         
         if student_id:
             event.stop_event()
-            result = await self.query_devices(student_id)
-            await event.bot.send_private_msg(user_id=int(user_id), message=result)
-            return
+            remaining = self._check_rate_limit(user_id)
+            if remaining > 0:
+                await event.bot.send_private_msg(
+                    user_id=int(user_id),
+                    message=f"❌ 查询过于频繁，请 {remaining} 秒后再试"
+                )
+                return
+            
+            status, user_name, result = await self.query_devices(student_id)
+            
+            if status == "error":
+                await event.bot.send_private_msg(user_id=int(user_id), message=result)
+                return
+            
+            if status == "offline":
+                await event.bot.send_private_msg(
+                    user_id=int(user_id),
+                    message=f"用户 {student_id} 无设备在线"
+                )
+                return
+            
+            if status == "online":
+                self.pending_verification[user_id] = {
+                    "student_id": student_id,
+                    "user_name": user_name,
+                    "retry_count": 3
+                }
+                self.pending_reply[user_id] = result
+                
+                await event.bot.send_private_msg(
+                    user_id=int(user_id),
+                    message=f"请输入该学号用户登记的姓名进行验证:"
+                )
+                return
         
         if self._is_trigger(message_str):
             event.stop_event()
@@ -114,21 +208,21 @@ class UserDevicesPlugin(Star):
                         return f"❌ 请求失败！HTTP 状态码: {response.status}"
                     
                     xml_text = await response.text()
-                    return self.parse_response(xml_text, username)
+                    return self._parse_for_verification(xml_text, username)
                     
         except aiohttp.ClientError:
-            return "❌ 连接错误：无法连接到 SAM 服务器"
+            return ("error", "❌ 连接错误：无法连接到 SAM 服务器", None)
         except Exception as e:
-            return f"❌ 发生未知错误: {e}"
+            return ("error", f"❌ 发生未知错误: {e}", None)
     
-    def parse_response(self, xml_text, target_username):
+    def _parse_for_verification(self, xml_text, target_username):
         try:
             root = ET.fromstring(xml_text)
             
             error_code_elems = root.findall(".//errorCode")
             
             if not error_code_elems:
-                return "❌ 解析失败：无法找到错误码节点。"
+                return ("error", "❌ 解析失败：无法找到错误码节点。", None)
             
             error_code = error_code_elems[0].text
             
@@ -136,30 +230,43 @@ class UserDevicesPlugin(Star):
                 online_user_infos = root.findall(".//onlineUserInfosV2")
                 
                 if online_user_infos:
-                    result = f"共找到 {len(online_user_infos)} 个在线设备：\n" + "-"*60 + "\n"
+                    user_name = None
+                    for online_user_info in online_user_infos:
+                        name_elem = online_user_info.find('userName')
+                        if name_elem is not None and name_elem.text:
+                            user_name = name_elem.text.strip()
+                            break
                     
-                    for i, online_user_info in enumerate(online_user_infos):
-                        result += f"设备 {i+1}:\n"
-                        result += f"  用户名:      {online_user_info.find('userId').text if online_user_info.find('userId') is not None else 'N/A'}\n"
-                        result += f"  MAC 地址:    {online_user_info.find('userMac').text if online_user_info.find('userMac') is not None else 'N/A'}\n"
-                        result += f"  IP 地址:     {online_user_info.find('userIpv4').text if online_user_info.find('userIpv4') is not None else 'N/A'}\n"
-                        result += f"  接入设备IP:  {online_user_info.find('nasIp').text if online_user_info.find('nasIp') is not None else 'N/A'}\n"
-                        result += f"  设备类型:    {online_user_info.find('terminalTypeDes').text if online_user_info.find('terminalTypeDes') is not None else 'N/A'}\n"
-                        result += f"  上线时间:    {online_user_info.find('onlineTime').text if online_user_info.find('onlineTime') is not None else 'N/A'}\n"
-                        result += f"  区域:        {online_user_info.find('areaName').text if online_user_info.find('areaName') is not None else 'N/A'}\n"
-                        result += f"  套餐:        {online_user_info.find('serviceId').text if online_user_info.find('serviceId') is not None else 'N/A'}\n"
-                        result += "-" * 60 + "\n"
-                    
-                    return result
+                    result = self._format_result(online_user_infos, target_username)
+                    return ("online", user_name, result)
                 else:
-                    return f"用户 {target_username} 无设备在线。"
+                    return ("offline", None, None)
             else:
                 error_msg_elems = root.findall(".//errorMessage")
                 error_msg_text = error_msg_elems[0].text if error_msg_elems else "无详细信息"
-                return f"接口返回错误 [代码: {error_code}]: {error_msg_text}"
+                return ("error", None, f"接口返回错误 [代码: {error_code}]: {error_msg_text}")
                 
         except ET.ParseError as e:
-            return f"XML 解析错误: {e}"
+            return ("error", None, f"XML 解析错误: {e}")
+    
+    def _format_result(self, online_user_infos, target_username):
+        result = f"共找到 {len(online_user_infos)} 个在线设备：\n" + "-"*60 + "\n"
+        
+        for i, online_user_info in enumerate(online_user_infos):
+            result += f"设备 {i+1}:\n"
+            result += f"  用户名:      {online_user_info.find('userId').text if online_user_info.find('userId') is not None else 'N/A'}\n"
+            result += f"  MAC 地址:    {online_user_info.find('userMac').text if online_user_info.find('userMac') is not None else 'N/A'}\n"
+            result += f"  IP 地址:     {online_user_info.find('userIpv4').text if online_user_info.find('userIpv4') is not None else 'N/A'}\n"
+            result += f"  设备类型:    {online_user_info.find('terminalTypeDes').text if online_user_info.find('terminalTypeDes') is not None else 'N/A'}\n"
+            result += f"  上线时间:    {online_user_info.find('onlineTime').text if online_user_info.find('onlineTime') is not None else 'N/A'}\n"
+            result += f"  区域:        {online_user_info.find('areaName').text if online_user_info.find('areaName') is not None else 'N/A'}\n"
+            result += f"  套餐:        {online_user_info.find('serviceId').text if online_user_info.find('serviceId') is not None else 'N/A'}\n"
+            result += "-" * 60 + "\n"
+        
+        return result
     
     async def terminate(self):
         self.pending_users.clear()
+        self.user_query_times.clear()
+        self.pending_verification.clear()
+        self.pending_reply.clear()
