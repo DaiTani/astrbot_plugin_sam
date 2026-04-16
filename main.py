@@ -10,7 +10,6 @@ class UserDevicesPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
         self.config = context.get_config()
-        self.user_sessions = {}
         
     def _is_trigger(self, message: str) -> bool:
         keywords = ["在线设备", "查询设备", "设备查询", "在线用户", "查询用户", "用户查询"]
@@ -23,26 +22,32 @@ class UserDevicesPlugin(Star):
         group_id = event.message_obj.group_id if hasattr(event.message_obj, 'group_id') else ""
         is_group = bool(group_id)
         
-        if not self._is_trigger(message_str):
-            return
+        student_id = self.extract_student_id(message_str)
         
         if is_group:
-            yield event.plain_result("请私信我发送学号进行查询\n（例如202592xxxxxx）")
-            event.stop_event()
+            if self._is_trigger(message_str):
+                await self.context.send_message(
+                    user_id,
+                    MessageChain().message("请直接发送学号给我进行查询\n（例如202592xxxxxx）")
+                )
+                event.stop_event()
             return
         
-        if "学号" in message_str or self.extract_student_id(message_str):
-            if self.extract_student_id(message_str):
-                student_id = self.extract_student_id(message_str)
-                del self.user_sessions[user_id]
-                result = await self.query_devices(student_id)
-                yield event.plain_result(result)
-                event.stop_event()
-                return
+        if student_id:
+            event.stop_event()
+            result = await self.query_devices(student_id)
+            await self.context.send_message(
+                user_id,
+                MessageChain().message(result)
+            )
+            return
         
-        self.user_sessions[user_id] = "waiting_for_student_id"
-        yield event.plain_result("请发送学号进行查询\n（例如202592xxxxxx）")
-        event.stop_event()
+        if self._is_trigger(message_str):
+            event.stop_event()
+            await self.context.send_message(
+                user_id,
+                MessageChain().message("请发送学号进行查询\n（例如202592xxxxxx）")
+            )
     
     def extract_student_id(self, message: str) -> str:
         match = re.search(r'202[4-9]\d{8}', message)
@@ -141,5 +146,4 @@ class UserDevicesPlugin(Star):
             return f"XML 解析错误: {e}"
     
     async def terminate(self):
-        self.user_sessions.clear()
         pass
