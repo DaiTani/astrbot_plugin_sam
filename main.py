@@ -21,6 +21,49 @@ class UserDevicesPlugin(Star):
         keywords = ["在线设备", "查询设备", "设备查询", "在线用户", "查询用户", "用户查询"]
         return any(kw in message for kw in keywords)
     
+    def _extract_id_from_query(self, message: str) -> str:
+        match = re.match(r'^设备查询\s+(\d{12})$', message)
+        if match:
+            return match.group(1)
+        return ""
+    
+    async def _process_query(self, event: AstrMessageEvent, student_id: str):
+        user_id = event.get_sender_id()
+        remaining = self._check_rate_limit(user_id)
+        if remaining > 0:
+            await event.bot.send_private_msg(
+                user_id=int(user_id),
+                message=f"查询过于频繁，请 {remaining} 秒后再试"
+            )
+            return
+        
+        status, user_name, result = await self.query_devices(student_id)
+        
+        if status == "error":
+            await event.bot.send_private_msg(user_id=int(user_id), message=result)
+            return
+        
+        if status == "offline":
+            await event.bot.send_private_msg(
+                user_id=int(user_id),
+                message=f"用户 {student_id} 无设备在线"
+            )
+            return
+        
+        if status == "online":
+            self.pending_verification[user_id] = {
+                "student_id": student_id,
+                "user_name": user_name,
+                "retry_count": 3
+            }
+            self.pending_reply[user_id] = result
+            
+            await event.bot.send_private_msg(
+                user_id=int(user_id),
+                message=f"请输入该学号用户登记的姓名进行验证:"
+            )
+            return
+    
     def _check_rate_limit(self, user_id: str) -> int:
         current_time = time.time()
         if user_id in self.user_query_times:
@@ -41,10 +84,13 @@ class UserDevicesPlugin(Star):
         if user_id not in self.pending_verification:
             return False
         
+        input_name = user_input.strip()
+        if not input_name:
+            return True
+        
         verify_info = self.pending_verification[user_id]
         expected_name = verify_info["user_name"]
         retry_count = verify_info.get("retry_count", 3)
-        input_name = user_input.strip()
         
         if input_name == expected_name:
             result = self.pending_reply.get(user_id, "")
@@ -66,14 +112,14 @@ class UserDevicesPlugin(Star):
                 
                 await event.bot.send_private_msg(
                     user_id=int(user_id),
-                    message="❌ 姓名验证失败次数过多。Maximum number of retries reached. Please try again later."
+                    message="姓名验证失败次数过多。Maximum number of retries reached. Please try again later."
                 )
                 logger.info(f"用户 [{user_id}] 姓名验证失败，已达最大重试次数")
             else:
                 self.pending_verification[user_id]["retry_count"] = retry_count
                 await event.bot.send_private_msg(
                     user_id=int(user_id),
-                    message=f"❌ 姓名不匹配，请重新输入（剩余 {retry_count} 次尝试机会）:\n请输入该学号用户登记的姓名:"
+                    message=f"姓名不匹配，请重新输入（剩余 {retry_count} 次尝试机会）:\n请输入该学号用户登记的姓名:"
                 )
             
             return True
@@ -91,8 +137,23 @@ class UserDevicesPlugin(Star):
             return
         
         student_id = self.extract_student_id(message_str)
+        query_student_id = self._extract_id_from_query(message_str)
         
         if is_group:
+            if query_student_id:
+                event.stop_event()
+                try:
+                    await event.bot.send_private_msg(
+                        user_id=int(user_id),
+                        message="已收到查询请求，正在处理..."
+                    )
+                    await self._process_query(event, query_student_id)
+                    yield event.plain_result(f"@ {event.get_sender_nickname()} 已通过私聊为您处理查询请求")
+                except Exception as e:
+                    logger.warning(f"发送私聊失败: {e}")
+                    yield event.plain_result("请先添加机器人为好友后再使用此功能")
+                return
+            
             if self._is_trigger(message_str):
                 try:
                     await event.bot.send_private_msg(
@@ -105,42 +166,11 @@ class UserDevicesPlugin(Star):
                 event.stop_event()
             return
         
-        if student_id:
+        if student_id or query_student_id:
             event.stop_event()
-            remaining = self._check_rate_limit(user_id)
-            if remaining > 0:
-                await event.bot.send_private_msg(
-                    user_id=int(user_id),
-                    message=f"❌ 查询过于频繁，请 {remaining} 秒后再试"
-                )
-                return
-            
-            status, user_name, result = await self.query_devices(student_id)
-            
-            if status == "error":
-                await event.bot.send_private_msg(user_id=int(user_id), message=result)
-                return
-            
-            if status == "offline":
-                await event.bot.send_private_msg(
-                    user_id=int(user_id),
-                    message=f"用户 {student_id} 无设备在线"
-                )
-                return
-            
-            if status == "online":
-                self.pending_verification[user_id] = {
-                    "student_id": student_id,
-                    "user_name": user_name,
-                    "retry_count": 3
-                }
-                self.pending_reply[user_id] = result
-                
-                await event.bot.send_private_msg(
-                    user_id=int(user_id),
-                    message=f"请输入该学号用户登记的姓名进行验证:"
-                )
-                return
+            target_id = student_id if student_id else query_student_id
+            await self._process_query(event, target_id)
+            return
         
         if self._is_trigger(message_str):
             event.stop_event()
@@ -205,15 +235,15 @@ class UserDevicesPlugin(Star):
                     timeout=aiohttp.ClientTimeout(total=10)
                 ) as response:
                     if response.status != 200:
-                        return f"❌ 请求失败！HTTP 状态码: {response.status}"
+                        return f"请求失败！HTTP 状态码: {response.status}"
                     
                     xml_text = await response.text()
                     return self._parse_for_verification(xml_text, username)
                     
         except aiohttp.ClientError:
-            return ("error", "❌ 连接错误：无法连接到 SAM 服务器", None)
+            return ("error", "连接错误：无法连接到 SAM 服务器", None)
         except Exception as e:
-            return ("error", f"❌ 发生未知错误: {e}", None)
+            return ("error", f"发生未知错误: {e}", None)
     
     def _parse_for_verification(self, xml_text, target_username):
         try:
@@ -222,7 +252,7 @@ class UserDevicesPlugin(Star):
             error_code_elems = root.findall(".//errorCode")
             
             if not error_code_elems:
-                return ("error", "❌ 解析失败：无法找到错误码节点。", None)
+                return ("error", "解析失败：无法找到错误码节点。", None)
             
             error_code = error_code_elems[0].text
             
