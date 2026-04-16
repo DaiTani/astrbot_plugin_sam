@@ -9,65 +9,58 @@ import re
 class UserDevicesPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
-        # 从配置中获取SAM服务器信息
         self.config = context.get_config()
-        # 存储用户会话状态，用于跟踪用户是否正在进行设备查询
         self.user_sessions = {}
+        
+    def _is_trigger(self, message: str) -> bool:
+        keywords = ["在线设备", "查询设备", "设备查询", "在线用户", "查询用户", "用户查询"]
+        return any(kw in message for kw in keywords)
         
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def on_all_message(self, event: AstrMessageEvent):
-        '''处理所有消息，支持"在线设备查询"指令'''        
         message_str = event.message_str.strip()
         user_id = event.get_sender_id()
+        session_type = event.message_type
         
-        # 检查是否是"在线设备查询"指令
-        if "在线设备查询" in message_str:
-            # 获取用户的私聊会话ID
-            umo = event.unified_msg_origin
-            # 存储用户会话状态
-            self.user_sessions[user_id] = "waiting_for_student_id"
-            # 主动向用户发送私聊消息
-            await self.context.send_message(
-                umo,
-                MessageChain().message("请告知我完整学号：\n（例如202592xxxxxx)")
-            )
+        if not self._is_trigger(message_str):
             return
         
-        # 检查用户是否正在等待输入学号
-        if user_id in self.user_sessions and self.user_sessions[user_id] == "waiting_for_student_id":
-            # 提取学号
-            student_id = self.extract_student_id(message_str)
-            if student_id:
-                # 清除会话状态
+        if session_type == "group":
+            await self.context.send_message(
+                user_id,
+                MessageChain().message("请私信我发送学号进行查询\n（例如202592xxxxxx）")
+            )
+            event.stop_event()
+            return
+        
+        if "学号" in message_str or self.extract_student_id(message_str):
+            if self.extract_student_id(message_str):
+                student_id = self.extract_student_id(message_str)
                 del self.user_sessions[user_id]
-                # 查询设备信息
                 await self.query_devices(event, student_id)
-            else:
-                # 提示用户输入正确的学号
-                await self.context.send_message(
-                    event.unified_msg_origin,
-                    MessageChain().message("请输入正确的学号格式，例如202592xxxxxx")
-                )
+                event.stop_event()
+                return
+        
+        self.user_sessions[user_id] = "waiting_for_student_id"
+        await self.context.send_message(
+            event.unified_msg_origin,
+            MessageChain().message("请发送学号进行查询\n（例如202592xxxxxx）")
+        )
+        event.stop_event()
     
     def extract_student_id(self, message: str) -> str:
-        '''提取消息中的学号信息'''        
-        # 使用正则表达式匹配学号格式
-        # 假设学号格式为：202[4-9]开头，后面跟8位数字
         match = re.search(r'202[4-9]\d{8}', message)
         if match:
             return match.group(0)
         return ""
     
     async def query_devices(self, event: AstrMessageEvent, username: str):
-        '''查询用户在线设备信息'''        
         logger.info(f"查询用户 [{username}] 的在线设备")
         
-        # 获取配置
         sam_url = self.config.get("sam_url", "https://172.17.21.115:8443/sam/services/samapi")
         admin_user = self.config.get("admin_user", "zzpt")
         admin_pass = self.config.get("admin_pass", "Zzpt@0923")
         
-        # 构造Basic Auth头
         auth_str = f"{admin_user}:{admin_pass}"
         base64_auth = base64.b64encode(auth_str.encode()).decode('utf-8')
         
@@ -77,7 +70,6 @@ class UserDevicesPlugin(Star):
             "SOAPAction": "http://api.spl.ruijie.com/queryOnlineUserV2"
         }
         
-        # 构造SOAP请求体
         soap_body = f"""<?xml version="1.0" encoding="utf-8"?>
 <SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/">
    <SOAP-ENV:Body>
@@ -103,7 +95,7 @@ class UserDevicesPlugin(Star):
                 ) as response:
                     if response.status != 200:
                         await self.context.send_message(
-                            event.unified_msg_origin,
+                            event.get_sender_id(),
                             MessageChain().message(f"❌ 请求失败！HTTP 状态码: {response.status}")
                         )
                         return
@@ -111,18 +103,18 @@ class UserDevicesPlugin(Star):
                     xml_text = await response.text()
                     result = self.parse_response(xml_text, username)
                     await self.context.send_message(
-                        event.unified_msg_origin,
+                        event.get_sender_id(),
                         MessageChain().message(result)
                     )
                     
         except aiohttp.ClientError as e:
             await self.context.send_message(
-                event.unified_msg_origin,
-                MessageChain().message(f"❌ 连接错误：无法连接到 SAM 服务器，请检查 IP 地址、端口或网络连接。")
+                event.get_sender_id(),
+                MessageChain().message(f"❌ 连接错误：无法连接到 SAM 服务器")
             )
         except Exception as e:
             await self.context.send_message(
-                event.unified_msg_origin,
+                event.get_sender_id(),
                 MessageChain().message(f"❌ 发生未知错误: {e}")
             )
     
@@ -130,7 +122,6 @@ class UserDevicesPlugin(Star):
         try:
             root = ET.fromstring(xml_text)
             
-            # 查找错误码节点
             error_code_elems = root.findall(".//errorCode")
             
             if not error_code_elems:
@@ -139,7 +130,6 @@ class UserDevicesPlugin(Star):
             error_code = error_code_elems[0].text
             
             if error_code == "0":
-                # 查找在线用户信息节点
                 online_user_infos = root.findall(".//onlineUserInfosV2")
                 
                 if online_user_infos:
@@ -161,7 +151,6 @@ class UserDevicesPlugin(Star):
                 else:
                     return f"用户 {target_username} 无设备在线。"
             else:
-                # 查找错误消息节点
                 error_msg_elems = root.findall(".//errorMessage")
                 error_msg_text = error_msg_elems[0].text if error_msg_elems else "无详细信息"
                 return f"接口返回错误 [代码: {error_code}]: {error_msg_text}"
@@ -170,7 +159,5 @@ class UserDevicesPlugin(Star):
             return f"XML 解析错误: {e}"
     
     async def terminate(self):
-        '''插件被卸载/停用时调用'''        
-        # 清理会话状态
         self.user_sessions.clear()
         pass
