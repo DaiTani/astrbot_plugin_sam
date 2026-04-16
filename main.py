@@ -189,7 +189,6 @@ class UserDevicesPlugin(Star):
                     )
                 except Exception as e:
                     logger.warning(f"发送私聊失败: {e}")
-                    yield event.plain_result("请先添加机器人为好友后再使用此功能")
                 event.stop_event()
             return
         
