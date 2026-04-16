@@ -16,28 +16,20 @@ class UserDevicesPlugin(Star):
         keywords = ["在线设备", "查询设备", "设备查询", "在线用户", "查询用户", "用户查询"]
         return any(kw in message for kw in keywords)
     
-    def _get_private_session(self, unified_msg_origin: str, user_id: str) -> str:
-        parts = unified_msg_origin.split(":")
-        if len(parts) >= 2:
-            return f"{parts[0]}:PRIVATE_MESSAGE:{user_id}"
-        return f"sam_bot:PRIVATE_MESSAGE:{user_id}"
-    
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def on_all_message(self, event: AstrMessageEvent):
         message_str = event.message_str.strip()
         user_id = event.get_sender_id()
         group_id = event.message_obj.group_id if hasattr(event.message_obj, 'group_id') else ""
         is_group = bool(group_id)
-        unified_origin = event.unified_msg_origin
         
         student_id = self.extract_student_id(message_str)
         
         if is_group:
             if self._is_trigger(message_str):
-                private_session = self._get_private_session(unified_origin, user_id)
-                await self.context.send_message(
-                    private_session,
-                    MessageChain().message("请直接发送学号给我进行查询\n（例如202592xxxxxx）")
+                await event.bot.send_private_msg(
+                    user_id=int(user_id),
+                    message="请直接发送学号给我进行查询\n（例如202592xxxxxx）"
                 )
                 event.stop_event()
             return
@@ -45,9 +37,9 @@ class UserDevicesPlugin(Star):
         if student_id:
             event.stop_event()
             result = await self.query_devices(student_id)
-            await self.context.send_message(
-                unified_origin,
-                MessageChain().message(result)
+            await event.bot.send_private_msg(
+                user_id=int(user_id),
+                message=result
             )
             return
         
@@ -62,9 +54,9 @@ class UserDevicesPlugin(Star):
                 if sid:
                     controller.stop()
                     result = await self.query_devices(sid)
-                    await evt.send(MessageChain().message(result))
+                    await evt.bot.send_private_msg(user_id=int(user_id), message=result)
                 else:
-                    await evt.send(MessageChain().message("请输入正确的学号格式，例如202592xxxxxx"))
+                    await evt.bot.send_private_msg(user_id=int(user_id), message="请输入正确的学号格式，例如202592xxxxxx")
                     controller.keep(timeout=120, reset_timeout=True)
             
             try:
