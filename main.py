@@ -27,7 +27,8 @@ class UserDevicesPlugin(Star):
         patterns = [
             r'^设备查询\s+(1043\d{7})',
             r'^设备查询\s+(5\d{5})',
-            r'^设备查询\s+(H[A-Za-z0-9]{6})'
+            r'^设备查询\s+(H[A-Za-z0-9]{6})',
+            r'^设备查询\s+(202[4-9]\d{8})'
         ]
         
         for pattern in patterns:
@@ -190,7 +191,7 @@ class UserDevicesPlugin(Star):
                 except Exception as e:
                     logger.warning(f"发送私聊失败: {e}")
                 event.stop_event()
-            return
+                return
         
         if account_id or query_account_id:
             event.stop_event()
@@ -218,7 +219,8 @@ class UserDevicesPlugin(Star):
         patterns = [
             r'1043\d{7}',
             r'5\d{5}',
-            r'H[A-Za-z0-9]{6}'
+            r'H[A-Za-z0-9]{6}',
+            r'202[4-9]\d{8}'
         ]
         
         for pattern in patterns:
@@ -235,6 +237,8 @@ class UserDevicesPlugin(Star):
             return (True, "正式编制教师账号")
         elif re.match(r'^H[A-Za-z0-9]{6}$', account):
             return (True, "合同工教师账号")
+        elif re.match(r'^202[4-9]\d{8}$', account):
+            return (True, "学生账号")
         else:
             return (False, "未知账号类型")
     
