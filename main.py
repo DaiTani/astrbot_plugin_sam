@@ -1,6 +1,7 @@
 from astrbot.api.event import filter, AstrMessageEvent, MessageChain
 from astrbot.api.star import Context, Star
 from astrbot.api import logger
+from astrbot.core.utils.session_waiter import session_waiter, SessionController
 import aiohttp
 import base64
 import xml.etree.ElementTree as ET
@@ -18,9 +19,9 @@ class UserDevicesPlugin(Star):
     def _get_private_session(self, unified_msg_origin: str, user_id: str) -> str:
         parts = unified_msg_origin.split(":")
         if len(parts) >= 2:
-            return f"{parts[0]}:private:{user_id}"
-        return f"sam_bot:private:{user_id}"
-        
+            return f"{parts[0]}:friend:{user_id}"
+        return f"sam_bot:friend:{user_id}"
+    
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def on_all_message(self, event: AstrMessageEvent):
         message_str = event.message_str.strip()
@@ -52,10 +53,26 @@ class UserDevicesPlugin(Star):
         
         if self._is_trigger(message_str):
             event.stop_event()
-            await self.context.send_message(
-                unified_origin,
-                MessageChain().message("请发送学号进行查询\n（例如202592xxxxxx）")
-            )
+            
+            @session_waiter(timeout=120, record_history_chains=False)
+            async def wait_for_student_id(controller: SessionController, evt: AstrMessageEvent):
+                msg = evt.message_str.strip()
+                sid = self.extract_student_id(msg)
+                
+                if sid:
+                    controller.stop()
+                    result = await self.query_devices(sid)
+                    await evt.send(MessageChain().message(result))
+                else:
+                    await evt.send(MessageChain().message("请输入正确的学号格式，例如202592xxxxxx"))
+                    controller.keep(timeout=120, reset_timeout=True)
+            
+            try:
+                await wait_for_student_id(event)
+            except TimeoutError:
+                pass
+            finally:
+                event.stop_event()
     
     def extract_student_id(self, message: str) -> str:
         match = re.search(r'202[4-9]\d{8}', message)
