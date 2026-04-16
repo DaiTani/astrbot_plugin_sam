@@ -20,12 +20,13 @@ class UserDevicesPlugin(Star):
     async def on_all_message(self, event: AstrMessageEvent):
         message_str = event.message_str.strip()
         user_id = event.get_sender_id()
-        session_type = event.message_type
+        group_id = event.message_obj.group_id if hasattr(event.message_obj, 'group_id') else ""
+        is_group = bool(group_id)
         
         if not self._is_trigger(message_str):
             return
         
-        if session_type == "group":
+        if is_group:
             await self.context.send_message(
                 user_id,
                 MessageChain().message("请私信我发送学号进行查询\n（例如202592xxxxxx）")
