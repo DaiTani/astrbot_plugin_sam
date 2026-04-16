@@ -45,7 +45,7 @@ class UserDevicesPlugin(Star):
         if student_id:
             event.stop_event()
             result = await self.query_devices(student_id)
-            yield event.plain_result(result)
+            await event.bot.send_private_msg(user_id=int(user_id), message=result)
             return
         
         if self._is_trigger(message_str):
@@ -59,14 +59,13 @@ class UserDevicesPlugin(Star):
                 if sid:
                     controller.stop()
                     result = await self.query_devices(sid)
-                    yield evt.plain_result(result)
+                    await evt.bot.send_private_msg(user_id=int(user_id), message=result)
                 else:
-                    yield evt.plain_result("请输入正确的学号格式，例如202592xxxxxx")
+                    await evt.bot.send_private_msg(user_id=int(user_id), message="请输入正确的学号格式，例如202592xxxxxx")
                     controller.keep(timeout=120, reset_timeout=True)
             
             try:
-                async for _ in wait_for_student_id(event):
-                    yield _
+                await wait_for_student_id(event)
             except TimeoutError:
                 pass
     
