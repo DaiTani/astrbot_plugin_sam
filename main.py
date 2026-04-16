@@ -31,17 +31,21 @@ class UserDevicesPlugin(Star):
         
         if is_group:
             if self._is_trigger(message_str):
-                await event.bot.send_private_msg(
-                    user_id=int(user_id),
-                    message="请直接发送学号给我进行查询\n（例如202592xxxxxx）"
-                )
+                try:
+                    await event.bot.send_private_msg(
+                        user_id=int(user_id),
+                        message="请直接发送学号给我进行查询\n（例如202592xxxxxx）"
+                    )
+                except Exception as e:
+                    logger.warning(f"发送私聊失败: {e}")
+                    yield event.plain_result("请先添加机器人为好友后再使用此功能")
                 event.stop_event()
             return
         
         if student_id:
             event.stop_event()
             result = await self.query_devices(student_id)
-            await event.bot.send_private_msg(user_id=int(user_id), message=result)
+            yield event.plain_result(result)
             return
         
         if self._is_trigger(message_str):
@@ -55,17 +59,16 @@ class UserDevicesPlugin(Star):
                 if sid:
                     controller.stop()
                     result = await self.query_devices(sid)
-                    await evt.bot.send_private_msg(user_id=int(user_id), message=result)
+                    yield evt.plain_result(result)
                 else:
-                    await evt.bot.send_private_msg(user_id=int(user_id), message="请输入正确的学号格式，例如202592xxxxxx")
+                    yield evt.plain_result("请输入正确的学号格式，例如202592xxxxxx")
                     controller.keep(timeout=120, reset_timeout=True)
             
             try:
-                await wait_for_student_id(event)
+                async for _ in wait_for_student_id(event):
+                    yield _
             except TimeoutError:
                 pass
-            finally:
-                event.stop_event()
     
     def extract_student_id(self, message: str) -> str:
         match = re.search(r'202[4-9]\d{8}', message)
@@ -145,6 +148,7 @@ class UserDevicesPlugin(Star):
                         result += f"  用户名:      {online_user_info.find('userId').text if online_user_info.find('userId') is not None else 'N/A'}\n"
                         result += f"  MAC 地址:    {online_user_info.find('userMac').text if online_user_info.find('userMac') is not None else 'N/A'}\n"
                         result += f"  IP 地址:     {online_user_info.find('userIpv4').text if online_user_info.find('userIpv4') is not None else 'N/A'}\n"
+                        result += f"  接入设备IP:  {online_user_info.find('nasIp').text if online_user_info.find('nasIp') is not None else 'N/A'}\n"
                         result += f"  设备类型:    {online_user_info.find('terminalTypeDes').text if online_user_info.find('terminalTypeDes') is not None else 'N/A'}\n"
                         result += f"  上线时间:    {online_user_info.find('onlineTime').text if online_user_info.find('onlineTime') is not None else 'N/A'}\n"
                         result += f"  区域:        {online_user_info.find('areaName').text if online_user_info.find('areaName') is not None else 'N/A'}\n"
