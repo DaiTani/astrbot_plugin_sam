@@ -2,7 +2,6 @@ from astrbot.api.event import filter, AstrMessageEvent, MessageChain
 from astrbot.api.event.filter import EventMessageType
 from astrbot.api.star import Context, Star
 from astrbot.api import logger
-from astrbot.core.utils.session_waiter import session_waiter, SessionController
 import aiohttp
 import base64
 import xml.etree.ElementTree as ET
@@ -12,6 +11,7 @@ class UserDevicesPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
         self.config = context.get_config()
+        self.pending_users = set()
         
     def _is_trigger(self, message: str) -> bool:
         keywords = ["在线设备", "查询设备", "设备查询", "在线用户", "查询用户", "用户查询"]
@@ -50,24 +50,20 @@ class UserDevicesPlugin(Star):
         
         if self._is_trigger(message_str):
             event.stop_event()
-            
-            @session_waiter(timeout=120, record_history_chains=False)
-            async def wait_for_student_id(controller: SessionController, evt: AstrMessageEvent):
-                msg = evt.message_str.strip()
-                sid = self.extract_student_id(msg)
-                
-                if sid:
-                    controller.stop()
-                    result = await self.query_devices(sid)
-                    await evt.bot.send_private_msg(user_id=int(user_id), message=result)
-                else:
-                    await evt.bot.send_private_msg(user_id=int(user_id), message="请输入正确的学号格式，例如202592xxxxxx")
-                    controller.keep(timeout=120, reset_timeout=True)
-            
-            try:
-                await wait_for_student_id(event)
-            except TimeoutError:
-                pass
+            self.pending_users.add(user_id)
+            await event.bot.send_private_msg(
+                user_id=int(user_id),
+                message="请发送学号进行查询\n（例如202592xxxxxx）"
+            )
+            return
+        
+        if user_id in self.pending_users:
+            self.pending_users.discard(user_id)
+            await event.bot.send_private_msg(
+                user_id=int(user_id),
+                message="请输入正确的学号格式，例如202592xxxxxx"
+            )
+            event.stop_event()
     
     def extract_student_id(self, message: str) -> str:
         match = re.search(r'202[4-9]\d{8}', message)
@@ -166,4 +162,4 @@ class UserDevicesPlugin(Star):
             return f"XML 解析错误: {e}"
     
     async def terminate(self):
-        pass
+        self.pending_users.clear()
