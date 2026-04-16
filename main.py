@@ -179,10 +179,11 @@ class UserDevicesPlugin(Star):
                     yield event.plain_result(f"@ {nickname} 已通过私聊为您处理查询请求")
                 except Exception as e:
                     logger.warning(f"发送私聊失败: {e}")
-                    yield event.plain_result("请先添加机器人为好友后再使用此功能")
+                    nickname = event.get_sender_nickname() if hasattr(event, 'get_sender_nickname') else str(user_id)
+                    yield event.plain_result(f"@ {nickname} 请先添加机器人为好友后再使用此功能")
                 return
             
-            if self._is_trigger(message_str):
+            if self._is_trigger(message_str) and "[CQ:at," in event.message_str:
                 try:
                     await event.bot.send_private_msg(
                         user_id=int(user_id),
@@ -190,8 +191,12 @@ class UserDevicesPlugin(Star):
                     )
                 except Exception as e:
                     logger.warning(f"发送私聊失败: {e}")
+                    nickname = event.get_sender_nickname() if hasattr(event, 'get_sender_nickname') else str(user_id)
+                    yield event.plain_result(f"@ {nickname} 请先添加机器人为好友后再使用此功能")
                 event.stop_event()
                 return
+            
+            return
         
         if account_id or query_account_id:
             event.stop_event()
@@ -202,7 +207,7 @@ class UserDevicesPlugin(Star):
         if self._is_trigger(message_str):
             event.stop_event()
             self.pending_users.add(user_id)
-            yield event.plain_result("请发送账号进行查询\n" + self.get_account_type_description())
+            yield event.plain_result("请发送账号进行查询")
             return
         
         if user_id in self.pending_users:
