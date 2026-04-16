@@ -22,7 +22,8 @@ class UserDevicesPlugin(Star):
         return any(kw in message for kw in keywords)
     
     def _extract_id_from_query(self, message: str) -> str:
-        match = re.match(r'^设备查询\s+(\d{12})$', message)
+        cleaned = re.sub(r'^@\S+\s*', '', message).strip()
+        match = re.match(r'^设备查询\s+(\d{12})$', cleaned)
         if match:
             return match.group(1)
         return ""
