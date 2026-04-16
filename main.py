@@ -180,18 +180,12 @@ class UserDevicesPlugin(Star):
         if self._is_trigger(message_str):
             event.stop_event()
             self.pending_users.add(user_id)
-            await event.bot.send_private_msg(
-                user_id=int(user_id),
-                message="请发送学号进行查询\n（例如202592xxxxxx）"
-            )
+            yield event.plain_result("请发送学号进行查询\n（例如202592xxxxxx）")
             return
         
         if user_id in self.pending_users:
             self.pending_users.discard(user_id)
-            await event.bot.send_private_msg(
-                user_id=int(user_id),
-                message="请输入正确的学号格式，例如202592xxxxxx"
-            )
+            yield event.plain_result("请输入正确的学号格式，例如202592xxxxxx")
             event.stop_event()
     
     def extract_student_id(self, message: str) -> str:
