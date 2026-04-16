@@ -231,7 +231,8 @@ class UserDevicesPlugin(Star):
     def validate_account_format(self, account: str) -> tuple[bool, str]:
         # 验证账号格式并返回账号类型
         if re.match(r'^1043\d{7}$', account):
-            return (True, "研究生账号
+            return (True, "研究生账号")
+        elif re.match(r'^5\d{5}$', account):
             return (True, "正式编制教师账号")
         elif re.match(r'^H[A-Za-z0-9]{6}$', account):
             return (True, "合同工教师账号")
