@@ -27,10 +27,7 @@ class UserDevicesPlugin(Star):
             return
         
         if is_group:
-            await self.context.send_message(
-                user_id,
-                MessageChain().message("请私信我发送学号进行查询\n（例如202592xxxxxx）")
-            )
+            yield event.plain_result("请私信我发送学号进行查询\n（例如202592xxxxxx）")
             event.stop_event()
             return
         
@@ -38,15 +35,13 @@ class UserDevicesPlugin(Star):
             if self.extract_student_id(message_str):
                 student_id = self.extract_student_id(message_str)
                 del self.user_sessions[user_id]
-                await self.query_devices(event, student_id)
+                result = await self.query_devices(student_id)
+                yield event.plain_result(result)
                 event.stop_event()
                 return
         
         self.user_sessions[user_id] = "waiting_for_student_id"
-        await self.context.send_message(
-            event.unified_msg_origin,
-            MessageChain().message("请发送学号进行查询\n（例如202592xxxxxx）")
-        )
+        yield event.plain_result("请发送学号进行查询\n（例如202592xxxxxx）")
         event.stop_event()
     
     def extract_student_id(self, message: str) -> str:
@@ -55,7 +50,7 @@ class UserDevicesPlugin(Star):
             return match.group(0)
         return ""
     
-    async def query_devices(self, event: AstrMessageEvent, username: str):
+    async def query_devices(self, username: str) -> str:
         logger.info(f"查询用户 [{username}] 的在线设备")
         
         sam_url = self.config.get("sam_url", "https://172.17.21.115:8443/sam/services/samapi")
@@ -95,29 +90,15 @@ class UserDevicesPlugin(Star):
                     timeout=aiohttp.ClientTimeout(total=10)
                 ) as response:
                     if response.status != 200:
-                        await self.context.send_message(
-                            event.get_sender_id(),
-                            MessageChain().message(f"❌ 请求失败！HTTP 状态码: {response.status}")
-                        )
-                        return
+                        return f"❌ 请求失败！HTTP 状态码: {response.status}"
                     
                     xml_text = await response.text()
-                    result = self.parse_response(xml_text, username)
-                    await self.context.send_message(
-                        event.get_sender_id(),
-                        MessageChain().message(result)
-                    )
+                    return self.parse_response(xml_text, username)
                     
-        except aiohttp.ClientError as e:
-            await self.context.send_message(
-                event.get_sender_id(),
-                MessageChain().message(f"❌ 连接错误：无法连接到 SAM 服务器")
-            )
+        except aiohttp.ClientError:
+            return "❌ 连接错误：无法连接到 SAM 服务器"
         except Exception as e:
-            await self.context.send_message(
-                event.get_sender_id(),
-                MessageChain().message(f"❌ 发生未知错误: {e}")
-            )
+            return f"❌ 发生未知错误: {e}"
     
     def parse_response(self, xml_text, target_username):
         try:
