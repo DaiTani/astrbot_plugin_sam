@@ -202,7 +202,7 @@ class UserDevicesPlugin(Star):
         if self._is_trigger(message_str):
             event.stop_event()
             self.pending_users.add(user_id)
-            yield event.plain_result("请发送账号进行查询\n" + self.get_account_type_description())
+            yield event.plain_result("请发送账号进行查询\n")
             return
         
         if user_id in self.pending_users:
