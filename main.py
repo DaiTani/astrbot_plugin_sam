@@ -14,6 +14,12 @@ class UserDevicesPlugin(Star):
     def _is_trigger(self, message: str) -> bool:
         keywords = ["在线设备", "查询设备", "设备查询", "在线用户", "查询用户", "用户查询"]
         return any(kw in message for kw in keywords)
+    
+    def _get_private_session(self, unified_msg_origin: str, user_id: str) -> str:
+        parts = unified_msg_origin.split(":")
+        if len(parts) >= 2:
+            return f"{parts[0]}:private:{user_id}"
+        return f"sam_bot:private:{user_id}"
         
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def on_all_message(self, event: AstrMessageEvent):
@@ -21,13 +27,15 @@ class UserDevicesPlugin(Star):
         user_id = event.get_sender_id()
         group_id = event.message_obj.group_id if hasattr(event.message_obj, 'group_id') else ""
         is_group = bool(group_id)
+        unified_origin = event.unified_msg_origin
         
         student_id = self.extract_student_id(message_str)
         
         if is_group:
             if self._is_trigger(message_str):
+                private_session = self._get_private_session(unified_origin, user_id)
                 await self.context.send_message(
-                    user_id,
+                    private_session,
                     MessageChain().message("请直接发送学号给我进行查询\n（例如202592xxxxxx）")
                 )
                 event.stop_event()
@@ -37,7 +45,7 @@ class UserDevicesPlugin(Star):
             event.stop_event()
             result = await self.query_devices(student_id)
             await self.context.send_message(
-                user_id,
+                unified_origin,
                 MessageChain().message(result)
             )
             return
@@ -45,7 +53,7 @@ class UserDevicesPlugin(Star):
         if self._is_trigger(message_str):
             event.stop_event()
             await self.context.send_message(
-                user_id,
+                unified_origin,
                 MessageChain().message("请发送学号进行查询\n（例如202592xxxxxx）")
             )
     
