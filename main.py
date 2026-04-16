@@ -148,10 +148,12 @@ class UserDevicesPlugin(Star):
             
             return True
     
-    @filter.event_message_type(EventMessageType.PRIVATE_MESSAGE)
-    async def on_private_message(self, event: AstrMessageEvent):
+    @filter.event_message_type(EventMessageType.ALL)
+    async def on_all_message(self, event: AstrMessageEvent):
         message_str = event.message_str.strip()
         user_id = event.get_sender_id()
+        group_id = self._get_group_id(event)
+        is_group = bool(group_id)
         
         if user_id in self.pending_verification:
             event.stop_event()
@@ -160,6 +162,36 @@ class UserDevicesPlugin(Star):
         
         account_id = self.extract_student_id(message_str)
         query_account_id = self._extract_id_from_query(message_str)
+        
+        if is_group:
+            if query_account_id:
+                event.stop_event()
+                try:
+                    await event.bot.send_private_msg(
+                        user_id=int(user_id),
+                        message="已收到查询请求，正在处理..."
+                    )
+                    await self._process_query(event, query_account_id)
+                    try:
+                        nickname = event.get_sender_nickname() if hasattr(event, 'get_sender_nickname') else str(user_id)
+                    except:
+                        nickname = str(user_id)
+                    yield event.plain_result(f"@ {nickname} 已通过私聊为您处理查询请求")
+                except Exception as e:
+                    logger.warning(f"发送私聊失败: {e}")
+                    yield event.plain_result("请先添加机器人为好友后再使用此功能")
+                return
+            
+            if self._is_trigger(message_str):
+                try:
+                    await event.bot.send_private_msg(
+                        user_id=int(user_id),
+                        message=self.get_account_type_description()
+                    )
+                except Exception as e:
+                    logger.warning(f"发送私聊失败: {e}")
+                event.stop_event()
+                return
         
         if account_id or query_account_id:
             event.stop_event()
@@ -170,7 +202,7 @@ class UserDevicesPlugin(Star):
         if self._is_trigger(message_str):
             event.stop_event()
             self.pending_users.add(user_id)
-            yield event.plain_result("请发送账号进行查询")
+            yield event.plain_result("请发送账号进行查询\n" + self.get_account_type_description())
             return
         
         if user_id in self.pending_users:
@@ -181,46 +213,6 @@ class UserDevicesPlugin(Star):
                 await self._process_query(event, extracted_id)
             else:
                 yield event.plain_result(self.get_error_message_for_invalid_format(message_str))
-            event.stop_event()
-    
-    @filter.event_message_type(EventMessageType.GROUP_MESSAGE)
-    async def on_group_message(self, event: AstrMessageEvent):
-        message_str = event.message_str.strip()
-        user_id = event.get_sender_id()
-        
-        account_id = self.extract_student_id(message_str)
-        query_account_id = self._extract_id_from_query(message_str)
-        
-        if query_account_id:
-            event.stop_event()
-            try:
-                await event.bot.send_private_msg(
-                    user_id=int(user_id),
-                    message="已收到查询请求，正在处理..."
-                )
-                await self._process_query(event, query_account_id)
-                nickname = event.get_sender_nickname() if hasattr(event, 'get_sender_nickname') else str(user_id)
-                yield event.plain_result(f"@ {nickname} 已通过私聊为您处理查询请求")
-            except Exception as e:
-                logger.warning(f"发送私聊失败: {e}")
-                nickname = event.get_sender_nickname() if hasattr(event, 'get_sender_nickname') else str(user_id)
-                yield event.plain_result(f"@ {nickname} 请先添加机器人为好友后再使用此功能")
-            return
-        
-        if self._is_trigger(message_str):
-            is_at_me = "[CQ:at," in event.message_str
-            if not is_at_me:
-                return
-            
-            try:
-                await event.bot.send_private_msg(
-                    user_id=int(user_id),
-                    message=self.get_account_type_description()
-                )
-            except Exception as e:
-                logger.warning(f"发送私聊失败: {e}")
-                nickname = event.get_sender_nickname() if hasattr(event, 'get_sender_nickname') else str(user_id)
-                yield event.plain_result(f"@ {nickname} 请先添加机器人为好友后再使用此功能")
             event.stop_event()
     
     def extract_student_id(self, message: str) -> str:
