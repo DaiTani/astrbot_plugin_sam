@@ -114,15 +114,15 @@ class UserDevicesPlugin(Star):
     def _get_group_id(self, event: AstrMessageEvent) -> str:
         return event.message_obj.group_id if hasattr(event.message_obj, 'group_id') else ""
     
-    async def _handle_name_verification(self, event: AstrMessageEvent, user_input: str) -> bool:
+    async def _handle_name_verification(self, event: AstrMessageEvent, user_input: str):
         user_id = event.get_sender_id()
         
         if user_id not in self.pending_verification:
-            return False
+            return
         
         input_name = user_input.strip()
         if not input_name:
-            return True
+            return
         
         verify_info = self.pending_verification[user_id]
         expected_name = verify_info["user_name"]
@@ -146,7 +146,6 @@ class UserDevicesPlugin(Star):
                 del self.pending_fail_log[user_id]
             
             logger.info(f"用户 [{user_id}] 姓名验证成功")
-            return True
         else:
             retry_count -= 1
             
@@ -166,8 +165,6 @@ class UserDevicesPlugin(Star):
                 self.pending_verification[user_id]["retry_count"] = retry_count
                 account_type = verify_info.get("account_type", "账号")
                 yield event.plain_result(f"姓名不匹配，请重新输入（剩余 {retry_count} 次尝试机会）:\n请输入该{account_type}登记的姓名:")
-            
-            return True
     
     @filter.event_message_type(EventMessageType.ALL)
     async def on_all_message(self, event: AstrMessageEvent):
