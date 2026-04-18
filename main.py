@@ -249,6 +249,36 @@ class UserDevicesPlugin(Star):
                     logger.warning(f"发送私聊失败: {e}")
                 event.stop_event()
                 return
+            
+            if self._is_login_log_trigger(message_str):
+                event.stop_event()
+                self.pending_login_log[user_id] = {"retry_count": 3}
+                try:
+                    await event.bot.send_private_msg(
+                        user_id=int(user_id),
+                        message="请输入您要查询的账号"
+                    )
+                    nickname = event.get_sender_nickname() if hasattr(event, 'get_sender_nickname') else str(user_id)
+                    yield event.plain_result(f"@ {nickname} 请查收私信")
+                except Exception as e:
+                    logger.warning(f"发送私聊失败: {e}")
+                    yield event.plain_result("请先添加机器人为好友后再使用此功能")
+                return
+            
+            if self._is_fail_log_trigger(message_str):
+                event.stop_event()
+                self.pending_fail_log[user_id] = {"retry_count": 3}
+                try:
+                    await event.bot.send_private_msg(
+                        user_id=int(user_id),
+                        message="请输入您要查询的账号"
+                    )
+                    nickname = event.get_sender_nickname() if hasattr(event, 'get_sender_nickname') else str(user_id)
+                    yield event.plain_result(f"@ {nickname} 请查收私信")
+                except Exception as e:
+                    logger.warning(f"发送私聊失败: {e}")
+                    yield event.plain_result("请先添加机器人为好友后再使用此功能")
+                return
         
         if account_id or query_account_id:
             event.stop_event()
