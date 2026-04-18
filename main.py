@@ -13,6 +13,7 @@ import pytz
 class UserDevicesPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
+        self.context = context
         self.config = context.get_config()
         self.pending_users = set()
         self.user_query_times = {}
@@ -25,6 +26,9 @@ class UserDevicesPlugin(Star):
         self.pending_diagnosis = {}
         self.diagnosis_context = {}
         self.pending_diagnosis_verification = {}
+
+    def _get_config(self):
+        return self.context.get_config()
         
     def _is_trigger(self, message: str) -> bool:
         if not self._is_feature_enabled("device"):
@@ -747,7 +751,8 @@ class UserDevicesPlugin(Star):
         feature_map = {
             "device": "enable_device_query",
             "login_log": "enable_login_log_query",
-            "fail_log": "enable_fail_log_query"
+            "fail_log": "enable_fail_log_query",
+            "network_diagnosis": "enable_network_diagnosis"
         }
         config_key = feature_map.get(feature, "")
         if config_key:
@@ -1224,10 +1229,13 @@ class UserDevicesPlugin(Star):
             return f"XML 解析错误: {e}"
 
     async def _call_llm_api(self, system_prompt: str, user_message: str, account_id: str = "") -> str:
-        llm_url = self.config.get("llm_api_url", "")
-        llm_key = self.config.get("llm_api_key", "")
-        llm_model = self.config.get("llm_model_name", "gpt-4")
-        llm_timeout = self.config.get("llm_timeout", 30)
+        config = self._get_config()
+        llm_url = config.get("llm_api_url", "")
+        llm_key = config.get("llm_api_key", "")
+        llm_model = config.get("llm_model_name", "gpt-4")
+        llm_timeout = config.get("llm_timeout", 30)
+
+        logger.info(f"LLM配置检查 - URL: {'已配置' if llm_url else '未配置'}, Key: {'已配置' if llm_key else '未配置'}")
 
         if not llm_url or not llm_key:
             logger.warning("LLM API配置不完整，无法进行智能分析")
@@ -1762,7 +1770,7 @@ class UserDevicesPlugin(Star):
         analysis_prompt += "请根据以上数据，分析用户可能遇到的问题原因（如：多设备登录冲突、账号被锁定、设备绑定数超限、认证失败等），并给出具体的解决方案。请使用中文回复，回复要简洁专业，直接指出问题所在和解决方法。"
 
         llm_result = await self._call_llm_api(
-            self.config.get("llm_system_prompt", ""),
+            self._get_config().get("llm_system_prompt", ""),
             analysis_prompt,
             username
         )
