@@ -1693,7 +1693,7 @@ class UserDevicesPlugin(Star):
                 user_id=int(user_id),
                 message=f"账号格式错误，无法进行诊断"
             )
-            del self.pending_diagnosis[user_id]
+            self.pending_diagnosis.pop(user_id, None)
             return
 
         logger.info(f"开始诊断账号 [{username}] 的网络问题")
@@ -1717,7 +1717,7 @@ class UserDevicesPlugin(Star):
                     error_msg = f"查询{name}时出错：{result['error']}"
                     break
             await event.bot.send_private_msg(user_id=int(user_id), message=error_msg)
-            del self.pending_diagnosis[user_id]
+            self.pending_diagnosis.pop(user_id, None)
             return
 
         user_name = account_info.get("user_name") or account_info.get("real_name") or ""
@@ -1784,7 +1784,7 @@ class UserDevicesPlugin(Star):
                 user_id=int(user_id),
                 message="智能分析暂时不可用，请稍后重试或联系管理员检查配置"
             )
-            del self.pending_diagnosis[user_id]
+            self.pending_diagnosis.pop(user_id, None)
 
     async def _handle_diagnosis_verification(self, event: AstrMessageEvent, user_input: str):
         user_id = event.get_sender_id()
@@ -1814,8 +1814,7 @@ class UserDevicesPlugin(Star):
             del self.diagnosis_context[user_id]
             if user_id in self.pending_diagnosis_verification:
                 del self.pending_diagnosis_verification[user_id]
-            if user_id in self.pending_diagnosis:
-                del self.pending_diagnosis[user_id]
+            self.pending_diagnosis.pop(user_id, None)
 
             logger.info(f"用户 [{user_id}] 网络诊断验证成功")
         else:
@@ -1824,8 +1823,7 @@ class UserDevicesPlugin(Star):
                 del self.diagnosis_context[user_id]
                 if user_id in self.pending_diagnosis_verification:
                     del self.pending_diagnosis_verification[user_id]
-                if user_id in self.pending_diagnosis:
-                    del self.pending_diagnosis[user_id]
+                self.pending_diagnosis.pop(user_id, None)
                 yield event.plain_result(f"姓名验证失败次数过多，网络诊断已取消。请稍后再试。")
                 logger.info(f"用户 [{user_id}] 网络诊断姓名验证失败")
             else:
