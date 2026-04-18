@@ -16,6 +16,8 @@ class UserDevicesPlugin(Star):
         self.user_query_times = {}
         self.pending_verification = {}
         self.pending_reply = {}
+        self.pending_user_type_selection = set()
+        self.user_selected_type = {}
         
     def _is_trigger(self, message: str) -> bool:
         keywords = ["在线设备", "查询设备", "设备查询", "在线用户", "查询用户", "用户查询", "zscx", "设备", "用户", "在线", "查询", "cx", "sb", "yh"]
@@ -160,6 +162,25 @@ class UserDevicesPlugin(Star):
             await self._handle_name_verification(event, message_str)
             return
         
+        if user_id in self.pending_user_type_selection:
+            event.stop_event()
+            await self._handle_user_type_selection(event, message_str)
+            return
+        
+        if user_id in self.pending_users:
+            event.stop_event()
+            selected_type = self.user_selected_type.get(user_id, "")
+            
+            if selected_type == "教职工":
+                await self._process_teacher_query(event, message_str)
+            else:
+                extracted_id = self.extract_student_id(message_str)
+                if extracted_id:
+                    await self._process_query(event, extracted_id)
+                else:
+                    yield event.plain_result(self.get_error_message_for_invalid_format(selected_type))
+            return
+        
         account_id = self.extract_student_id(message_str)
         query_account_id = self._extract_id_from_query(message_str)
         
@@ -186,7 +207,7 @@ class UserDevicesPlugin(Star):
                 try:
                     await event.bot.send_private_msg(
                         user_id=int(user_id),
-                        message=self.get_account_type_description()
+                        message=self.get_user_type_selection_prompt()
                     )
                 except Exception as e:
                     logger.warning(f"发送私聊失败: {e}")
@@ -201,19 +222,9 @@ class UserDevicesPlugin(Star):
         
         if self._is_trigger(message_str):
             event.stop_event()
-            self.pending_users.add(user_id)
-            yield event.plain_result("请发送账号进行查询\n")
+            self.pending_user_type_selection.add(user_id)
+            yield event.plain_result(self.get_user_type_selection_prompt())
             return
-        
-        if user_id in self.pending_users:
-            self.pending_users.discard(user_id)
-            
-            extracted_id = self.extract_student_id(message_str)
-            if extracted_id:
-                await self._process_query(event, extracted_id)
-            else:
-                yield event.plain_result(self.get_error_message_for_invalid_format(message_str))
-            event.stop_event()
     
     def extract_student_id(self, message: str) -> str:
         patterns = [
@@ -245,7 +256,86 @@ class UserDevicesPlugin(Star):
     def get_account_type_description(self) -> str:
         return ("请发送账号进行查询")
     
-    def get_error_message_for_invalid_format(self, user_input: str) -> str:
+    def get_user_type_selection_prompt(self) -> str:
+        return ("请选择您的身份类型：\n1. 本科生\n2. 研究生\n3. 教职工\n请回复数字（1/2/3）或直接回复类型名称")
+    
+    async def _handle_user_type_selection(self, event: AstrMessageEvent, user_input: str):
+        user_id = event.get_sender_id()
+        user_input = user_input.strip()
+        
+        valid_types = {
+            "1": "本科生",
+            "2": "研究生", 
+            "3": "教职工",
+            "本科生": "本科生",
+            "研究生": "研究生",
+            "教职工": "教职工"
+        }
+        
+        selected_type = valid_types.get(user_input)
+        
+        if not selected_type:
+            self.pending_user_type_selection.add(user_id)
+            await event.bot.send_private_msg(
+                user_id=int(user_id),
+                message="无效的选择，请重新选择：\n1. 本科生\n2. 研究生\n3. 教职工\n请回复数字（1/2/3）或直接回复类型名称"
+            )
+            return
+        
+        self.pending_user_type_selection.discard(user_id)
+        self.pending_users.add(user_id)
+        self.user_selected_type[user_id] = selected_type
+        
+        if selected_type == "教职工":
+            await event.bot.send_private_msg(
+                user_id=int(user_id),
+                message=f"您选择了【教职工】，请输入工号进行查询"
+            )
+        else:
+            await event.bot.send_private_msg(
+                user_id=int(user_id),
+                message=f"您选择了【{selected_type}】，请输入学号进行查询"
+            )
+    
+    async def _process_teacher_query(self, event: AstrMessageEvent, work_id: str):
+        user_id = event.get_sender_id()
+        work_id = work_id.strip()
+        
+        self.pending_users.discard(user_id)
+        if user_id in self.user_selected_type:
+            del self.user_selected_type[user_id]
+        
+        remaining = self._check_rate_limit(user_id)
+        if remaining > 0:
+            await event.bot.send_private_msg(
+                user_id=int(user_id),
+                message=f"查询过于频繁，请 {remaining} 秒后再试"
+            )
+            return
+        
+        logger.info(f"查询教职工 [{work_id}] 的在线设备")
+        status, user_name, result = await self.query_devices(work_id)
+        
+        if status == "error":
+            await event.bot.send_private_msg(user_id=int(user_id), message=result)
+            return
+        
+        if status == "offline":
+            await event.bot.send_private_msg(
+                user_id=int(user_id),
+                message=f"工号 {work_id} 无设备在线"
+            )
+            return
+        
+        if status == "online":
+            await event.bot.send_private_msg(user_id=int(user_id), message=result)
+            return
+    
+    def get_error_message_for_invalid_format(self, selected_type: str = "") -> str:
+        if selected_type == "教职工":
+            return (f"工号格式错误！")
+        elif selected_type in ["本科生", "研究生"]:
+            return (f"学号格式错误！")
         return (f"账号格式错误！")
     
     async def query_devices(self, username: str) -> str:
@@ -353,3 +443,5 @@ class UserDevicesPlugin(Star):
         self.user_query_times.clear()
         self.pending_verification.clear()
         self.pending_reply.clear()
+        self.pending_user_type_selection.clear()
+        self.user_selected_type.clear()
