@@ -402,7 +402,9 @@ class UserDevicesPlugin(Star):
             return
         
         logger.info(f"查询账号 [{user_input}] 的登录日志")
-        status, user_name, result = await self._query_login_log_for_verification(user_input)
+        user_name = await self._query_account_name(user_input)
+        
+        status, _, result = await self._query_login_log_for_verification(user_input)
         
         if status == "error":
             yield event.plain_result(result)
@@ -559,6 +561,71 @@ class UserDevicesPlugin(Star):
         
         return result
     
+    async def _query_account_name(self, username: str) -> str:
+        logger.info(f"查询账号 [{username}] 的用户信息")
+        
+        sam_url = self.config.get("sam_url", "https://172.17.21.115:8443/sam/services/samapi")
+        admin_user = self.config.get("admin_user", "zzpt")
+        admin_pass = self.config.get("admin_pass", "Zzpt@0923")
+        
+        auth_str = f"{admin_user}:{admin_pass}"
+        base64_auth = base64.b64encode(auth_str.encode()).decode('utf-8')
+        
+        headers = {
+            "Content-Type": "text/xml; charset=utf-8",
+            "Authorization": f"Basic {base64_auth}",
+            "SOAPAction": "http://api.spl.ruijie.com/queryAccountProfiles"
+        }
+        
+        soap_body = f"""<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Body>
+    <queryAccountProfiles>
+      <accountId>{username}</accountId>
+    </queryAccountProfiles>
+  </soap:Body>
+</soap:Envelope>
+"""
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    sam_url,
+                    data=soap_body,
+                    headers=headers,
+                    verify_ssl=False,
+                    timeout=aiohttp.ClientTimeout(total=10)
+                ) as response:
+                    if response.status != 200:
+                        return None
+                    
+                    xml_text = await response.text()
+                    return self._parse_account_name(xml_text)
+                    
+        except Exception:
+            return None
+    
+    def _parse_account_name(self, xml_text: str) -> str:
+        try:
+            root = ET.fromstring(xml_text)
+            
+            error_code_elems = root.findall(".//errorCode")
+            if not error_code_elems:
+                return None
+            
+            error_code = error_code_elems[0].text
+            if error_code != "0":
+                return None
+            
+            user_name_elems = root.findall(".//userName")
+            if user_name_elems and user_name_elems[0].text:
+                return user_name_elems[0].text.strip()
+            
+            return None
+                
+        except ET.ParseError:
+            return None
+    
     async def _handle_fail_log_input(self, event: AstrMessageEvent, user_input: str):
         user_id = event.get_sender_id()
         user_input = user_input.strip()
@@ -589,7 +656,9 @@ class UserDevicesPlugin(Star):
             return
         
         logger.info(f"查询账号 [{user_input}] 的失败日志")
-        status, user_name, result = await self._query_fail_log_for_verification(user_input)
+        user_name = await self._query_account_name(user_input)
+        
+        status, _, result = await self._query_fail_log_for_verification(user_input)
         
         if status == "error":
             yield event.plain_result(result)
