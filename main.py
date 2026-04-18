@@ -28,7 +28,15 @@ class UserDevicesPlugin(Star):
         self.pending_diagnosis_verification = {}
 
     def _get_config(self):
-        return self.context.get_config()
+        config = self.context.get_config()
+        plugin_set = config.get("plugin_set", {})
+        logger.info(f"plugin_set类型: {type(plugin_set)}, keys: {list(plugin_set.keys()) if isinstance(plugin_set, dict) else 'not dict'}")
+        if isinstance(plugin_set, dict):
+            for k, v in plugin_set.items():
+                if isinstance(v, dict) and ("llm_api_url" in v or "sam_url" in v):
+                    logger.info(f"找到可能的插件配置key: {k}")
+                    return v
+        return config
         
     def _is_trigger(self, message: str) -> bool:
         if not self._is_feature_enabled("device"):
