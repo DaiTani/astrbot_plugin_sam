@@ -632,23 +632,50 @@ class UserDevicesPlugin(Star):
             error_code = error_code_elems[0].text
             
             if error_code == "0":
-                online_details = root.findall(".//onlineDetailVOs")
+                online_details = root.findall(".//onlindetailInfo")
+                total_elems = root.findall(".//total")
+                total = total_elems[0].text if total_elems else "0"
                 
                 if not online_details:
-                    return "近三天内无登录日志记录"
+                    return f"共找到 0 条登录日志（近三天）"
                 
-                result = f"共找到 {len(online_details)} 条登录日志（近三天）：\n" + "-"*60 + "\n"
+                result = f"📋 登录日志查询结果（共 {total} 条，近三天）\n" + "="*60 + "\n"
                 
                 for i, detail in enumerate(online_details):
-                    result += f"日志 {i+1}:\n"
-                    result += f"  用户名:     {detail.find('userId').text if detail.find('userId') is not None else 'N/A'}\n"
-                    result += f"  登录 IP:    {detail.find('userIpv4').text if detail.find('userIpv4') is not None else 'N/A'}\n"
-                    result += f"  MAC 地址:   {detail.find('userMac').text if detail.find('userMac') is not None else 'N/A'}\n"
-                    result += f"  设备类型:   {detail.find('terminalTypeDes').text if detail.find('terminalTypeDes') is not None else 'N/A'}\n"
-                    result += f"  登录时间:   {detail.find('loginTime').text if detail.find('loginTime') is not None else 'N/A'}\n"
-                    result += f"  下线时间:   {detail.find('logoutTime').text if detail.find('logoutTime') is not None else 'N/A'}\n"
-                    result += f"  区域:       {detail.find('areaName').text if detail.find('areaName') is not None else 'N/A'}\n"
-                    result += "-" * 60 + "\n"
+                    login_time = detail.find('loginTime').text if detail.find('loginTime') is not None else 'N/A'
+                    logout_time = detail.find('logoutTime').text if detail.find('logoutTime') is not None else 'N/A'
+                    
+                    if login_time != 'N/A' and login_time:
+                        login_time = login_time.replace('T', ' ').replace('+08:00', '').replace('.000+08:00', '')
+                    if logout_time != 'N/A' and logout_time:
+                        logout_time = logout_time.replace('T', ' ').replace('+08:00', '').replace('.000+08:00', '')
+                    
+                    online_sec = int(detail.find('onlineSec').text if detail.find('onlineSec') is not None else '0')
+                    hours = online_sec // 3600
+                    minutes = (online_sec % 3600) // 60
+                    seconds = online_sec % 60
+                    duration_str = f"{hours}小时{minutes}分{seconds}秒" if hours > 0 else f"{minutes}分{seconds}秒"
+                    
+                    user_ipv4 = detail.find('userIpv4').text if detail.find('userIpv4') is not None else 'N/A'
+                    user_mac = detail.find('userMac').text if detail.find('userMac') is not None else 'N/A'
+                    terminal_type = detail.find('terminalTypeDes').text if detail.find('terminalTypeDes') is not None else 'N/A'
+                    area_name = detail.find('areaName').text if detail.find('areaName') is not None else 'N/A'
+                    service_id = detail.find('serviceId').text if detail.find('serviceId') is not None else 'N/A'
+                    terminate_cause = detail.find('terminateCause').text if detail.find('terminateCause') is not None else 'N/A'
+                    
+                    result += f"🔹 日志 {i+1}\n"
+                    result += f"   账号:      {detail.find('userId').text if detail.find('userId') is not None else 'N/A'}\n"
+                    result += f"   登录IP:    {user_ipv4}\n"
+                    result += f"   MAC地址:   {user_mac}\n"
+                    result += f"   设备类型:  {terminal_type}\n"
+                    result += f"   区域:      {area_name}\n"
+                    result += f"   套餐:      {service_id}\n"
+                    result += f"   登录时间:  {login_time}\n"
+                    result += f"   下线时间:  {logout_time}\n"
+                    result += f"   在线时长:  {duration_str}\n"
+                    if terminate_cause and terminate_cause != 'N/A':
+                        result += f"   下线原因:  {terminate_cause}\n"
+                    result += "   " + "-"*55 + "\n"
                 
                 return result
             else:
@@ -725,22 +752,73 @@ class UserDevicesPlugin(Star):
             error_code = error_code_elems[0].text
             
             if error_code == "0":
-                fail_logs = root.findall(".//loginFailLogVOs")
+                fail_logs = root.findall(".//loginFailLog")
+                total_elems = root.findall(".//total")
+                total = total_elems[0].text if total_elems else "0"
                 
                 if not fail_logs:
-                    return "近三天内无失败登录记录"
+                    return f"共找到 0 条失败日志（近三天）"
                 
-                result = f"共找到 {len(fail_logs)} 条失败日志（近三天）：\n" + "-"*60 + "\n"
+                result = f"失败日志查询结果（共 {total} 条，近三天）\n" + "="*60 + "\n"
                 
                 for i, log in enumerate(fail_logs):
-                    result += f"日志 {i+1}:\n"
-                    result += f"  用户名:     {log.find('userId').text if log.find('userId') is not None else 'N/A'}\n"
-                    result += f"  登录 IP:    {log.find('userIpv4').text if log.find('userIpv4') is not None else 'N/A'}\n"
-                    result += f"  MAC 地址:   {log.find('userMac').text if log.find('userMac') is not None else 'N/A'}\n"
-                    result += f"  失败时间:   {log.find('failTime').text if log.find('failTime') is not None else 'N/A'}\n"
-                    result += f"  失败原因:   {log.find('failReason').text if log.find('failReason') is not None else 'N/A'}\n"
-                    result += f"  区域:       {log.find('areaName').text if log.find('areaName') is not None else 'N/A'}\n"
-                    result += "-" * 60 + "\n"
+                    create_time = log.find('createTime').text if log.find('createTime') is not None else 'N/A'
+                    msg = log.find('msg').text if log.find('msg') is not None else 'N/A'
+                    
+                    if create_time != 'N/A' and create_time:
+                        create_time = create_time.replace('T', ' ').replace('+08:00', '')
+                    
+                    user_id = 'N/A'
+                    area = 'N/A'
+                    service = 'N/A'
+                    access_type = 'N/A'
+                    nas_ip = 'N/A'
+                    user_ipv4 = 'N/A'
+                    user_mac = 'N/A'
+                    location = 'N/A'
+                    reason = 'N/A'
+                    
+                    if msg and msg != 'N/A':
+                        try:
+                            parts = msg.split(', ')
+                            for part in parts:
+                                if ':' in part:
+                                    key_value = part.split(':', 1)
+                                    if len(key_value) == 2:
+                                        key = key_value[0].strip()
+                                        value = key_value[1].strip()
+                                        if key == '用户':
+                                            user_id = value.strip('()')
+                                        elif key == '地区':
+                                            area = value
+                                        elif key == '服务':
+                                            service = value
+                                        elif key == '接入方式':
+                                            access_type = value
+                                        elif key == 'NAS IPv4':
+                                            nas_ip = value
+                                        elif key == '用户IPv4':
+                                            user_ipv4 = value
+                                        elif key == 'MAC':
+                                            user_mac = value
+                                        elif key == '接入位置描述':
+                                            location = value
+                                        elif key == '原因':
+                                            reason = value
+                        except Exception:
+                            pass
+                    
+                    result += f"🔸 失败 {i+1}\n"
+                    result += f"   账号:      {user_id}\n"
+                    result += f"   失败时间:  {create_time}\n"
+                    result += f"   失败IP:    {user_ipv4}\n"
+                    result += f"   MAC地址:   {user_mac}\n"
+                    result += f"   接入方式:  {access_type}\n"
+                    result += f"   区域:      {area}\n"
+                    result += f"   服务:      {service}\n"
+                    result += f"   位置:      {location}\n"
+                    result += f"   原因:      {reason}\n"
+                    result += "   " + "-"*55 + "\n"
                 
                 return result
             else:
