@@ -1230,6 +1230,7 @@ class UserDevicesPlugin(Star):
 
     async def _call_llm_api(self, system_prompt: str, user_message: str, account_id: str = "") -> str:
         config = self._get_config()
+        logger.info(f"完整配置keys: {list(config.keys())}")
         llm_url = config.get("llm_api_url", "")
         llm_key = config.get("llm_api_key", "")
         llm_model = config.get("llm_model_name", "gpt-4")
