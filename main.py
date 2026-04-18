@@ -28,6 +28,12 @@ class UserDevicesPlugin(Star):
         self.pending_diagnosis_verification = {}
 
     def _get_config(self):
+        logger.info(f"context dir: {[x for x in dir(self.context) if not x.startswith('_')]}")
+        if hasattr(self.context, 'get_plugin_config'):
+            plugin_config = self.context.get_plugin_config()
+            logger.info(f"get_plugin_config: {plugin_config}")
+            if plugin_config:
+                return plugin_config
         logger.info(f"self.config = {self.config}")
         logger.info(f"self.config中的llm配置: llm_api_url = {self.config.get('llm_api_url', 'NOT_FOUND')}")
         return self.config
