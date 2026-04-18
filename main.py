@@ -1238,7 +1238,7 @@ class UserDevicesPlugin(Star):
             if "{{account_id}}" in full_prompt and account_id:
                 full_prompt = full_prompt.replace("{{account_id}}", account_id)
             
-            provider_id = await self.context.get_using_provider()
+            provider_id = self.context.get_using_provider()
             resp = await self.context.llm_generate(
                 chat_provider_id=provider_id,
                 prompt=full_prompt
