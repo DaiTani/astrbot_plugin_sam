@@ -181,12 +181,14 @@ class UserDevicesPlugin(Star):
         
         if user_id in self.pending_login_log:
             event.stop_event()
-            await self._handle_login_log_input(event, message_str)
+            async for ret in self._handle_login_log_input(event, message_str):
+                yield ret
             return
         
         if user_id in self.pending_fail_log:
             event.stop_event()
-            await self._handle_fail_log_input(event, message_str)
+            async for ret in self._handle_fail_log_input(event, message_str):
+                yield ret
             return
         
         if user_id in self.pending_users:
