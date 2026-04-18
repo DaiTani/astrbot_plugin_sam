@@ -1233,15 +1233,15 @@ class UserDevicesPlugin(Star):
             return f"XML 解析错误: {e}"
 
     async def _call_llm_api(self, system_prompt: str, user_message: str, account_id: str = "") -> str:
-        if "{{account_id}}" in system_prompt and account_id:
-            system_prompt = system_prompt.replace("{{account_id}}", account_id)
-
         try:
-            result = await self.context.llm_generate(
-                [{"role": "user", "content": user_message}],
-                system_prompt=system_prompt
-            )
-            return result
+            full_prompt = f"{system_prompt}\n\n{user_message}"
+            if "{{account_id}}" in full_prompt and account_id:
+                full_prompt = full_prompt.replace("{{account_id}}", account_id)
+            
+            resp = await self.context.llm_generate(prompt=full_prompt)
+            if resp and resp.completion_text:
+                return resp.completion_text.strip()
+            return None
         except Exception as e:
             logger.error(f"LLM调用失败: {e}")
             return None
