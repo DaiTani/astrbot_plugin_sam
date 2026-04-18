@@ -26,7 +26,7 @@ class UserDevicesPlugin(Star):
     def _is_trigger(self, message: str) -> bool:
         if not self._is_feature_enabled("device"):
             return False
-        keywords = ["在线设备", "查询设备", "设备查询", "在线用户", "查询用户", "用户查询", "zscx", "设备", "用户", "在线", "查询", "cx", "sb", "yh"]
+        keywords = ["在线设备", "查询设备", "设备查询", "在线用户", "查询用户", "用户查询", "zscx"]
         return any(kw in message for kw in keywords)
     
     def _is_login_log_trigger(self, message: str) -> bool:
@@ -151,6 +151,12 @@ class UserDevicesPlugin(Star):
                 del self.pending_login_log[user_id]
             if user_id in self.pending_fail_log:
                 del self.pending_fail_log[user_id]
+            if user_id in self.pending_users:
+                self.pending_users.discard(user_id)
+            if user_id in self.user_selected_type:
+                del self.user_selected_type[user_id]
+            if user_id in self.pending_user_type_selection:
+                self.pending_user_type_selection.discard(user_id)
             
             logger.info(f"用户 [{user_id}] 姓名验证成功")
         else:
@@ -164,6 +170,12 @@ class UserDevicesPlugin(Star):
                     del self.pending_login_log[user_id]
                 if user_id in self.pending_fail_log:
                     del self.pending_fail_log[user_id]
+                if user_id in self.pending_users:
+                    self.pending_users.discard(user_id)
+                if user_id in self.user_selected_type:
+                    del self.user_selected_type[user_id]
+                if user_id in self.pending_user_type_selection:
+                    self.pending_user_type_selection.discard(user_id)
                 
                 account_type = verify_info.get("account_type", "账号")
                 yield event.plain_result(f"{account_type}姓名验证失败次数过多。请稍后再试。")
