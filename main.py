@@ -24,14 +24,20 @@ class UserDevicesPlugin(Star):
         self.pending_fail_log = {}
         
     def _is_trigger(self, message: str) -> bool:
+        if not self._is_feature_enabled("device"):
+            return False
         keywords = ["在线设备", "查询设备", "设备查询", "在线用户", "查询用户", "用户查询", "zscx", "设备", "用户", "在线", "查询", "cx", "sb", "yh"]
         return any(kw in message for kw in keywords)
     
     def _is_login_log_trigger(self, message: str) -> bool:
+        if not self._is_feature_enabled("login_log"):
+            return False
         keywords = ["上线日志", "登录日志"]
         return any(kw in message for kw in keywords)
     
     def _is_fail_log_trigger(self, message: str) -> bool:
+        if not self._is_feature_enabled("fail_log"):
+            return False
         keywords = ["失败日志", "登录失败", "登录异常"]
         return any(kw in message for kw in keywords)
     
@@ -101,12 +107,13 @@ class UserDevicesPlugin(Star):
             return
     
     def _check_rate_limit(self, user_id: str) -> int:
+        rate_limit = self.config.get("rate_limit_seconds", 60)
         current_time = time.time()
         if user_id in self.user_query_times:
             last_query_time = self.user_query_times[user_id]
             elapsed = current_time - last_query_time
-            if elapsed < 60:
-                remaining = int(60 - elapsed)
+            if elapsed < rate_limit:
+                remaining = int(rate_limit - elapsed)
                 return remaining
         self.user_query_times[user_id] = current_time
         return 0
@@ -437,8 +444,8 @@ class UserDevicesPlugin(Star):
         auth_str = f"{admin_user}:{admin_pass}"
         base64_auth = base64.b64encode(auth_str.encode()).decode('utf-8')
         
-        from_login_time, to_login_time = self._get_three_days_range()
-        from_logout_time, to_logout_time = self._get_three_days_range()
+        from_login_time, to_login_time = self._get_query_days_range()
+        from_logout_time, to_logout_time = self._get_query_days_range()
         
         headers = {
             "Content-Type": "text/xml; charset=utf-8",
@@ -626,6 +633,25 @@ class UserDevicesPlugin(Star):
         except ET.ParseError:
             return None
     
+    def _get_query_days_range(self):
+        query_days = self.config.get("query_days", 3)
+        tz = pytz.utc
+        now = datetime.now(tz)
+        to_time = now
+        from_time = now - timedelta(days=query_days)
+        return from_time.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z", to_time.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    
+    def _is_feature_enabled(self, feature: str) -> bool:
+        feature_map = {
+            "device": "enable_device_query",
+            "login_log": "enable_login_log_query",
+            "fail_log": "enable_fail_log_query"
+        }
+        config_key = feature_map.get(feature, "")
+        if config_key:
+            return self.config.get(config_key, True)
+        return True
+    
     async def _handle_fail_log_input(self, event: AstrMessageEvent, user_input: str):
         user_id = event.get_sender_id()
         user_input = user_input.strip()
@@ -691,7 +717,7 @@ class UserDevicesPlugin(Star):
         auth_str = f"{admin_user}:{admin_pass}"
         base64_auth = base64.b64encode(auth_str.encode()).decode('utf-8')
         
-        from_date, to_date = self._get_three_days_range()
+        from_date, to_date = self._get_query_days_range()
         
         headers = {
             "Content-Type": "text/xml; charset=utf-8",
@@ -961,11 +987,12 @@ class UserDevicesPlugin(Star):
         self.pending_login_log.clear()
         self.pending_fail_log.clear()
     
-    def _get_three_days_range(self):
+    def _get_query_days_range(self):
+        query_days = self.config.get("query_days", 3)
         tz = pytz.utc
         now = datetime.now(tz)
         to_time = now
-        from_time = now - timedelta(days=3)
+        from_time = now - timedelta(days=query_days)
         return from_time.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z", to_time.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
     
     async def query_online_detail(self, username: str) -> str:
@@ -978,8 +1005,8 @@ class UserDevicesPlugin(Star):
         auth_str = f"{admin_user}:{admin_pass}"
         base64_auth = base64.b64encode(auth_str.encode()).decode('utf-8')
         
-        from_login_time, to_login_time = self._get_three_days_range()
-        from_logout_time, to_logout_time = self._get_three_days_range()
+        from_login_time, to_login_time = self._get_query_days_range()
+        from_logout_time, to_logout_time = self._get_query_days_range()
         
         headers = {
             "Content-Type": "text/xml; charset=utf-8",
@@ -1101,7 +1128,7 @@ class UserDevicesPlugin(Star):
         auth_str = f"{admin_user}:{admin_pass}"
         base64_auth = base64.b64encode(auth_str.encode()).decode('utf-8')
         
-        from_date, to_date = self._get_three_days_range()
+        from_date, to_date = self._get_query_days_range()
         
         headers = {
             "Content-Type": "text/xml; charset=utf-8",

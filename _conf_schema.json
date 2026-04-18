@@ -14,5 +14,39 @@
     "type": "string",
     "obvious_hint": true,
     "default": ""
+  },
+  "query_days": {
+    "description": "查询天数（近N天）",
+    "type": "int",
+    "hint": "设置登录日志和失败日志查询的时间范围，默认3天",
+    "default": 3,
+    "min": 1,
+    "max": 30
+  },
+  "rate_limit_seconds": {
+    "description": "查询等待时间（秒）",
+    "type": "int",
+    "hint": "同一用户两次查询之间的最小间隔时间，默认60秒",
+    "default": 60,
+    "min": 10,
+    "max": 300
+  },
+  "enable_device_query": {
+    "description": "启用在线设备查询",
+    "type": "bool",
+    "hint": "开启/关闭在线设备查询功能",
+    "default": true
+  },
+  "enable_login_log_query": {
+    "description": "启用上线日志查询",
+    "type": "bool",
+    "hint": "开启/关闭上线日志查询功能",
+    "default": true
+  },
+  "enable_fail_log_query": {
+    "description": "启用失败日志查询",
+    "type": "bool",
+    "hint": "开启/关闭失败日志查询功能",
+    "default": true
   }
 }
