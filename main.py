@@ -7,6 +7,8 @@ import base64
 import xml.etree.ElementTree as ET
 import re
 import time
+from datetime import datetime, timedelta
+import pytz
 
 class UserDevicesPlugin(Star):
     def __init__(self, context: Context):
@@ -18,9 +20,19 @@ class UserDevicesPlugin(Star):
         self.pending_reply = {}
         self.pending_user_type_selection = set()
         self.user_selected_type = {}
+        self.pending_login_log = {}
+        self.pending_fail_log = {}
         
     def _is_trigger(self, message: str) -> bool:
         keywords = ["在线设备", "查询设备", "设备查询", "在线用户", "查询用户", "用户查询", "zscx", "设备", "用户", "在线", "查询", "cx", "sb", "yh"]
+        return any(kw in message for kw in keywords)
+    
+    def _is_login_log_trigger(self, message: str) -> bool:
+        keywords = ["上线日志", "登录日志"]
+        return any(kw in message for kw in keywords)
+    
+    def _is_fail_log_trigger(self, message: str) -> bool:
+        keywords = ["失败日志", "登录失败", "登录异常"]
         return any(kw in message for kw in keywords)
     
     def _extract_id_from_query(self, message: str) -> str:
@@ -167,6 +179,16 @@ class UserDevicesPlugin(Star):
             await self._handle_user_type_selection(event, message_str)
             return
         
+        if user_id in self.pending_login_log:
+            event.stop_event()
+            await self._handle_login_log_input(event, message_str)
+            return
+        
+        if user_id in self.pending_fail_log:
+            event.stop_event()
+            await self._handle_fail_log_input(event, message_str)
+            return
+        
         if user_id in self.pending_users:
             event.stop_event()
             selected_type = self.user_selected_type.get(user_id, "")
@@ -218,6 +240,18 @@ class UserDevicesPlugin(Star):
             event.stop_event()
             target_id = account_id if account_id else query_account_id
             await self._process_query(event, target_id)
+            return
+        
+        if self._is_login_log_trigger(message_str):
+            event.stop_event()
+            self.pending_login_log[user_id] = {"retry_count": 3}
+            yield event.plain_result("请输入您要查询的账号")
+            return
+        
+        if self._is_fail_log_trigger(message_str):
+            event.stop_event()
+            self.pending_fail_log[user_id] = {"retry_count": 3}
+            yield event.plain_result("请输入您要查询的账号")
             return
         
         if self._is_trigger(message_str):
@@ -330,6 +364,80 @@ class UserDevicesPlugin(Star):
         if status == "online":
             await event.bot.send_private_msg(user_id=int(user_id), message=result)
             return
+    
+    async def _handle_login_log_input(self, event: AstrMessageEvent, user_input: str):
+        user_id = event.get_sender_id()
+        user_input = user_input.strip()
+        
+        if not user_input:
+            self.pending_login_log[user_id] = {"retry_count": 3}
+            yield event.plain_result("请输入您要查询的账号")
+            return
+        
+        is_valid, account_type = self.validate_account_format(user_input)
+        if not is_valid:
+            retry_count = self.pending_login_log[user_id].get("retry_count", 3)
+            retry_count -= 1
+            
+            if retry_count <= 0:
+                del self.pending_login_log[user_id]
+                yield event.plain_result("输入错误次数过多，请重新发送\"上线日志\"触发查询")
+                return
+            else:
+                self.pending_login_log[user_id]["retry_count"] = retry_count
+                yield event.plain_result(f"账号格式错误，请重新输入（剩余 {retry_count} 次尝试机会）")
+                return
+        
+        del self.pending_login_log[user_id]
+        
+        remaining = self._check_rate_limit(user_id)
+        if remaining > 0:
+            await event.bot.send_private_msg(
+                user_id=int(user_id),
+                message=f"查询过于频繁，请 {remaining} 秒后再试"
+            )
+            return
+        
+        logger.info(f"查询账号 [{user_input}] 的登录日志")
+        result = await self.query_online_detail(user_input)
+        yield event.plain_result(result)
+    
+    async def _handle_fail_log_input(self, event: AstrMessageEvent, user_input: str):
+        user_id = event.get_sender_id()
+        user_input = user_input.strip()
+        
+        if not user_input:
+            self.pending_fail_log[user_id] = {"retry_count": 3}
+            yield event.plain_result("请输入您要查询的账号")
+            return
+        
+        is_valid, account_type = self.validate_account_format(user_input)
+        if not is_valid:
+            retry_count = self.pending_fail_log[user_id].get("retry_count", 3)
+            retry_count -= 1
+            
+            if retry_count <= 0:
+                del self.pending_fail_log[user_id]
+                yield event.plain_result("输入错误次数过多，请重新发送\"失败日志\"触发查询")
+                return
+            else:
+                self.pending_fail_log[user_id]["retry_count"] = retry_count
+                yield event.plain_result(f"账号格式错误，请重新输入（剩余 {retry_count} 次尝试机会）")
+                return
+        
+        del self.pending_fail_log[user_id]
+        
+        remaining = self._check_rate_limit(user_id)
+        if remaining > 0:
+            await event.bot.send_private_msg(
+                user_id=int(user_id),
+                message=f"查询过于频繁，请 {remaining} 秒后再试"
+            )
+            return
+        
+        logger.info(f"查询账号 [{user_input}] 的失败日志")
+        result = await self.query_login_fail_log(user_input)
+        yield event.plain_result(result)
     
     def get_error_message_for_invalid_format(self, selected_type: str = "") -> str:
         if selected_type == "教职工":
@@ -445,3 +553,200 @@ class UserDevicesPlugin(Star):
         self.pending_reply.clear()
         self.pending_user_type_selection.clear()
         self.user_selected_type.clear()
+        self.pending_login_log.clear()
+        self.pending_fail_log.clear()
+    
+    def _get_three_days_range(self):
+        tz = pytz.utc
+        now = datetime.now(tz)
+        to_time = now
+        from_time = now - timedelta(days=3)
+        return from_time.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z", to_time.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    
+    async def query_online_detail(self, username: str) -> str:
+        logger.info(f"查询用户 [{username}] 的登录日志")
+        
+        sam_url = self.config.get("sam_url", "https://172.17.21.115:8443/sam/services/samapi")
+        admin_user = self.config.get("admin_user", "zzpt")
+        admin_pass = self.config.get("admin_pass", "Zzpt@0923")
+        
+        auth_str = f"{admin_user}:{admin_pass}"
+        base64_auth = base64.b64encode(auth_str.encode()).decode('utf-8')
+        
+        from_login_time, to_login_time = self._get_three_days_range()
+        from_logout_time, to_logout_time = self._get_three_days_range()
+        
+        headers = {
+            "Content-Type": "text/xml; charset=utf-8",
+            "Authorization": f"Basic {base64_auth}",
+            "SOAPAction": "http://api.spl.ruijie.com/queryOnlineDetailV2"
+        }
+        
+        soap_body = f"""<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Body>
+    <queryOnlineDetailV2>
+      <queryOnlineDetailParams>
+        <fromLoginTime>{from_login_time}</fromLoginTime>
+        <fromLogoutTime>{from_logout_time}</fromLogoutTime>
+        <limit>100</limit>
+        <offSet>0</offSet>
+        <toLoginTime>{to_login_time}</toLoginTime>
+        <toLogoutTime>{to_logout_time}</toLogoutTime>
+        <userId>{username}</userId>
+      </queryOnlineDetailParams>
+    </queryOnlineDetailV2>
+  </soap:Body>
+</soap:Envelope>
+"""
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    sam_url,
+                    data=soap_body,
+                    headers=headers,
+                    verify_ssl=False,
+                    timeout=aiohttp.ClientTimeout(total=10)
+                ) as response:
+                    if response.status != 200:
+                        return f"请求失败！HTTP 状态码: {response.status}"
+                    
+                    xml_text = await response.text()
+                    return self._parse_online_detail(xml_text)
+                    
+        except aiohttp.ClientError:
+            return "连接错误：无法连接到 SAM 服务器"
+        except Exception as e:
+            return f"发生未知错误: {e}"
+    
+    def _parse_online_detail(self, xml_text: str) -> str:
+        try:
+            root = ET.fromstring(xml_text)
+            
+            error_code_elems = root.findall(".//errorCode")
+            
+            if not error_code_elems:
+                return "解析失败：无法找到错误码节点"
+            
+            error_code = error_code_elems[0].text
+            
+            if error_code == "0":
+                online_details = root.findall(".//onlineDetailVOs")
+                
+                if not online_details:
+                    return "近三天内无登录日志记录"
+                
+                result = f"共找到 {len(online_details)} 条登录日志（近三天）：\n" + "-"*60 + "\n"
+                
+                for i, detail in enumerate(online_details):
+                    result += f"日志 {i+1}:\n"
+                    result += f"  用户名:     {detail.find('userId').text if detail.find('userId') is not None else 'N/A'}\n"
+                    result += f"  登录 IP:    {detail.find('userIpv4').text if detail.find('userIpv4') is not None else 'N/A'}\n"
+                    result += f"  MAC 地址:   {detail.find('userMac').text if detail.find('userMac') is not None else 'N/A'}\n"
+                    result += f"  设备类型:   {detail.find('terminalTypeDes').text if detail.find('terminalTypeDes') is not None else 'N/A'}\n"
+                    result += f"  登录时间:   {detail.find('loginTime').text if detail.find('loginTime') is not None else 'N/A'}\n"
+                    result += f"  下线时间:   {detail.find('logoutTime').text if detail.find('logoutTime') is not None else 'N/A'}\n"
+                    result += f"  区域:       {detail.find('areaName').text if detail.find('areaName') is not None else 'N/A'}\n"
+                    result += "-" * 60 + "\n"
+                
+                return result
+            else:
+                error_msg_elems = root.findall(".//errorMessage")
+                error_msg_text = error_msg_elems[0].text if error_msg_elems else "无详细信息"
+                return f"接口返回错误 [代码: {error_code}]: {error_msg_text}"
+                
+        except ET.ParseError as e:
+            return f"XML 解析错误: {e}"
+    
+    async def query_login_fail_log(self, username: str) -> str:
+        logger.info(f"查询用户 [{username}] 的失败日志")
+        
+        sam_url = self.config.get("sam_url", "https://172.17.21.115:8443/sam/services/samapi")
+        admin_user = self.config.get("admin_user", "zzpt")
+        admin_pass = self.config.get("admin_pass", "Zzpt@0923")
+        
+        auth_str = f"{admin_user}:{admin_pass}"
+        base64_auth = base64.b64encode(auth_str.encode()).decode('utf-8')
+        
+        from_date, to_date = self._get_three_days_range()
+        
+        headers = {
+            "Content-Type": "text/xml; charset=utf-8",
+            "Authorization": f"Basic {base64_auth}",
+            "SOAPAction": "http://api.spl.ruijie.com/queryLoginFailLog"
+        }
+        
+        soap_body = f"""<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Body>
+    <queryLoginFailLog>
+      <queryLoginFailLogParams>
+        <fromDate>{from_date}</fromDate>
+        <limit>100</limit>
+        <offSet>0</offSet>
+        <toDate>{to_date}</toDate>
+        <userId>{username}</userId>
+      </queryLoginFailLogParams>
+    </queryLoginFailLog>
+  </soap:Body>
+</soap:Envelope>
+"""
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    sam_url,
+                    data=soap_body,
+                    headers=headers,
+                    verify_ssl=False,
+                    timeout=aiohttp.ClientTimeout(total=10)
+                ) as response:
+                    if response.status != 200:
+                        return f"请求失败！HTTP 状态码: {response.status}"
+                    
+                    xml_text = await response.text()
+                    return self._parse_login_fail_log(xml_text)
+                    
+        except aiohttp.ClientError:
+            return "连接错误：无法连接到 SAM 服务器"
+        except Exception as e:
+            return f"发生未知错误: {e}"
+    
+    def _parse_login_fail_log(self, xml_text: str) -> str:
+        try:
+            root = ET.fromstring(xml_text)
+            
+            error_code_elems = root.findall(".//errorCode")
+            
+            if not error_code_elems:
+                return "解析失败：无法找到错误码节点"
+            
+            error_code = error_code_elems[0].text
+            
+            if error_code == "0":
+                fail_logs = root.findall(".//loginFailLogVOs")
+                
+                if not fail_logs:
+                    return "近三天内无失败登录记录"
+                
+                result = f"共找到 {len(fail_logs)} 条失败日志（近三天）：\n" + "-"*60 + "\n"
+                
+                for i, log in enumerate(fail_logs):
+                    result += f"日志 {i+1}:\n"
+                    result += f"  用户名:     {log.find('userId').text if log.find('userId') is not None else 'N/A'}\n"
+                    result += f"  登录 IP:    {log.find('userIpv4').text if log.find('userIpv4') is not None else 'N/A'}\n"
+                    result += f"  MAC 地址:   {log.find('userMac').text if log.find('userMac') is not None else 'N/A'}\n"
+                    result += f"  失败时间:   {log.find('failTime').text if log.find('failTime') is not None else 'N/A'}\n"
+                    result += f"  失败原因:   {log.find('failReason').text if log.find('failReason') is not None else 'N/A'}\n"
+                    result += f"  区域:       {log.find('areaName').text if log.find('areaName') is not None else 'N/A'}\n"
+                    result += "-" * 60 + "\n"
+                
+                return result
+            else:
+                error_msg_elems = root.findall(".//errorMessage")
+                error_msg_text = error_msg_elems[0].text if error_msg_elems else "无详细信息"
+                return f"接口返回错误 [代码: {error_code}]: {error_msg_text}"
+                
+        except ET.ParseError as e:
+            return f"XML 解析错误: {e}"
