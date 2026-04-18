@@ -363,7 +363,9 @@ class UserDevicesPlugin(Star):
         if account_id or query_account_id:
             event.stop_event()
             target_id = account_id if account_id else query_account_id
-            await self._process_query(event, target_id)
+            self.pending_diagnosis.pop(user_id, None)
+            yield event.plain_result(f"正在诊断账号 [{target_id}] 的网络问题...")
+            await self._perform_network_diagnosis(event, user_id, target_id)
             return
 
         if self._is_login_log_trigger(message_str):
