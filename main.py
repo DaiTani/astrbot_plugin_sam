@@ -28,14 +28,10 @@ class UserDevicesPlugin(Star):
         self.pending_diagnosis_verification = {}
 
     def _get_config(self):
-        logger.info(f"context dir: {[x for x in dir(self.context) if not x.startswith('_')]}")
         if hasattr(self.context, 'get_plugin_config'):
             plugin_config = self.context.get_plugin_config()
-            logger.info(f"get_plugin_config: {plugin_config}")
             if plugin_config:
                 return plugin_config
-        logger.info(f"self.config = {self.config}")
-        logger.info(f"self.config中的llm配置: llm_api_url = {self.config.get('llm_api_url', 'NOT_FOUND')}")
         return self.config
         
     def _is_trigger(self, message: str) -> bool:
@@ -1237,59 +1233,17 @@ class UserDevicesPlugin(Star):
             return f"XML 解析错误: {e}"
 
     async def _call_llm_api(self, system_prompt: str, user_message: str, account_id: str = "") -> str:
-        config = self._get_config()
-        logger.info(f"完整配置keys: {list(config.keys())}")
-        llm_url = config.get("llm_api_url", "")
-        llm_key = config.get("llm_api_key", "")
-        llm_model = config.get("llm_model_name", "gpt-4")
-        llm_timeout = config.get("llm_timeout", 30)
-
-        logger.info(f"LLM配置检查 - URL: {'已配置' if llm_url else '未配置'}, Key: {'已配置' if llm_key else '未配置'}")
-
-        if not llm_url or not llm_key:
-            logger.warning("LLM API配置不完整，无法进行智能分析")
-            return None
-
         if "{{account_id}}" in system_prompt and account_id:
             system_prompt = system_prompt.replace("{{account_id}}", account_id)
 
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {llm_key}"
-        }
-
-        payload = {
-            "model": llm_model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message}
-            ],
-            "temperature": 0.3,
-            "max_tokens": 2000
-        }
-
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    llm_url,
-                    json=payload,
-                    headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=llm_timeout)
-                ) as response:
-                    if response.status != 200:
-                        error_text = await response.text()
-                        logger.error(f"LLM API调用失败: {response.status} - {error_text}")
-                        return None
-
-                    result = await response.json()
-                    if "choices" in result and len(result["choices"]) > 0:
-                        return result["choices"][0]["message"]["content"]
-                    return None
-        except aiohttp.ClientError as e:
-            logger.error(f"LLM API连接错误: {e}")
-            return None
+            result = await self.context.llm_generate(
+                [{"role": "user", "content": user_message}],
+                system_prompt=system_prompt
+            )
+            return result
         except Exception as e:
-            logger.error(f"LLM API未知错误: {e}")
+            logger.error(f"LLM调用失败: {e}")
             return None
 
     async def _query_account_info(self, username: str) -> dict:
