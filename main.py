@@ -1660,6 +1660,20 @@ class UserDevicesPlugin(Star):
     def _filter_logs_sensitive_info(self, logs: list) -> list:
         return [self._filter_sensitive_info(l) for l in logs]
 
+    def _strip_markdown(self, text: str) -> str:
+        import re
+        text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
+        text = re.sub(r'\*(.+?)\*', r'\1', text)
+        text = re.sub(r'__(.+?)__', r'\1', text)
+        text = re.sub(r'_(.+?)_', r'\1', text)
+        text = re.sub(r'#+\s+', '', text)
+        text = re.sub(r'^-+\s*$', '', text, flags=re.MULTILINE)
+        text = re.sub(r'^[-*]\s+', '', text, flags=re.MULTILINE)
+        text = re.sub(r'^>\s+', '', text, flags=re.MULTILINE)
+        text = re.sub(r'`(.+?)`', r'\1', text)
+        text = re.sub(r'\n{3,}', '\n\n', text)
+        return text.strip()
+
     async def _perform_network_diagnosis(self, event: AstrMessageEvent, user_id: str, username: str, user_description: str = ""):
         await event.bot.send_private_msg(
             user_id=int(user_id),
@@ -1778,6 +1792,7 @@ class UserDevicesPlugin(Star):
 
         if input_name == expected_name:
             llm_analysis = ctx.get("llm_analysis", "")
+            llm_analysis = self._strip_markdown(llm_analysis)
 
             final_result = "📋 网络问题诊断结果\n" + "="*60 + "\n"
             final_result += f"账号：{ctx.get('account_id', 'N/A')}\n"
