@@ -1,0 +1,8 @@
+name: astrbot_plugin_sam
+display_name: 用户设备查询插件
+description: 查询用户在线设备信息
+author: yzdr
+version: 1.0.0
+support_platforms:
+  - qq_official
+astrbot_version: ">=4.16,<5"

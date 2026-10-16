@@ -1,0 +1,70 @@
+{
+  "sam_url": {
+    "description": "SAM服务器地址",
+    "type": "string",
+    "default": ""
+  },
+  "admin_user": {
+    "description": "管理员用户名",
+    "type": "string",
+    "default": ""
+  },
+  "admin_pass": {
+    "description": "管理员密码",
+    "type": "string",
+    "obvious_hint": true,
+    "default": ""
+  },
+  "query_days": {
+    "description": "查询天数（近N天）",
+    "type": "int",
+    "hint": "设置登录日志和失败日志查询的时间范围，默认3天",
+    "default": 3,
+    "min": 1,
+    "max": 30
+  },
+  "rate_limit_seconds": {
+    "description": "查询等待时间（秒）",
+    "type": "int",
+    "hint": "同一用户两次查询之间的最小间隔时间，默认60秒",
+    "default": 60,
+    "min": 10,
+    "max": 300
+  },
+  "enable_device_query": {
+    "description": "启用在线设备查询",
+    "type": "bool",
+    "hint": "开启/关闭在线设备查询功能",
+    "default": true
+  },
+  "enable_login_log_query": {
+    "description": "启用上线日志查询",
+    "type": "bool",
+    "hint": "开启/关闭上线日志查询功能",
+    "default": true
+  },
+  "enable_fail_log_query": {
+    "description": "启用失败日志查询",
+    "type": "bool",
+    "hint": "开启/关闭失败日志查询功能",
+    "default": true
+  },
+  "enable_network_diagnosis": {
+    "description": "启用网络问题诊断功能",
+    "type": "bool",
+    "hint": "开启/关闭网络问题智能诊断功能",
+    "default": true
+  },
+  "llm_system_prompt": {
+    "description": "系统提示词",
+    "type": "string",
+    "hint": "指导大模型如何分析网络问题，{{account_id}}会被替换为实际账号",
+    "default": "你是一位专业的网络运维助手。根据提供的查询数据，分析用户可能遇到的网络问题并给出简洁的解决方案。要求：1. 回复控制在150字以内；2. 不要提及具体IP地址或设备地址；3. 直接指出问题原因和解决方法，不要客套话。"
+  },
+  "enable_llm_analysis": {
+    "description": "启用LLM智能分析",
+    "type": "bool",
+    "hint": "关闭后直接展示查询数据，不再调用大模型分析（适合本地模型较慢的情况）",
+    "default": true
+  }
+}
